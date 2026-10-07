@@ -30,7 +30,7 @@ use gpui::{
     Action, Anchor, Animation, AnimationExt, AnyElement, App, Context, Element, Entity, Focusable,
     InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
     StatefulInteractiveElement, Styled, Subscription, TaskExt, WeakEntity, Window, actions, div,
-    pulsating_between,
+    pulsating_between, rgba,
 };
 use onboarding_banner::OnboardingBanner;
 use project::{
@@ -341,7 +341,7 @@ impl Render for TitleBar {
                     title_bar.child(
                         Label::new("KnightCode")
                             .size(LabelSize::Small)
-                            .text_color(gpui::rgb(0xb19bff)),
+                            .color(gpui::rgb(0xb19bff)),
                     )
                 })
                 .map(|title_bar| {
@@ -647,8 +647,8 @@ impl TitleBar {
 
     fn render_global_search(&self) -> impl IntoElement {
         ButtonLike::new("knightcode-global-search")
-            .w(px(440.))
-            .h(px(34.))
+            .width(px(440.))
+            .height(px(34.))
             .px_3()
             .rounded_lg()
             .border_1()
