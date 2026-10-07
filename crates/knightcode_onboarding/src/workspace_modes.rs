@@ -437,7 +437,14 @@ impl WorkspaceModes {
         cx: &mut App,
     ) {
         if let Some(docks) = self.build_docks.take() {
-            workspace.set_dock_structure(docks, window, cx);
+            let workspace_handle = self.workspace.clone();
+            window.defer(cx, move |window, cx| {
+                workspace_handle
+                    .update(cx, |workspace, cx| {
+                        workspace.set_dock_structure(docks, window, cx);
+                    })
+                    .log_err();
+            });
         }
         if let Some(pane) = self.page_pane.take().and_then(|pane| pane.upgrade()) {
             pane.update(cx, |pane, cx| pane.zoom_out(&ZoomOut, window, cx));
