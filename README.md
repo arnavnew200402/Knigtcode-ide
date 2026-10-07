@@ -1,0 +1,244 @@
+> [!IMPORTANT]
+> Remove this line to confirm you've reviewed this PR before submitting.
+
+# KnightCode IDE
+
+A desktop IDE built on a fork of Zed, with KnightCode as its only agent,
+its only inference path, and its only login. The IDE is Rust. The AI stack
+stays in the KnightCode TypeScript packages and ships alongside it as a
+headless engine binary.
+
+The engine is a peer of the KnightCode CLI, not a mode of it. It owns
+every provider request and every credential, the agent loop, tools, skills,
+extensions, compaction, and session persistence. The IDE owns every pixel
+and keystroke, buffers, which model is selected, the sign-in presentation,
+and the engine process's lifetime. The IDE holds no API key, runs no OAuth
+exchange, and stores no credential.
+
+Three seams connect them. The agent panel speaks ACP over stdio. Buffer
+inline assist, terminal inline assist, commit messages and thread titles
+speak HTTP chat completions on loopback. Tab / next-edit prediction speaks
+HTTP fill-in-the-middle. One login serves all three.
+
+## Base
+
+This `main` starts at Zed commit
+`a57ba9b17c433ea1ebfdec8f649f4fa5a402d03b` (2026-09-10 17:54:38 UTC),
+tagged here as `knightcode-base`.
+
+Nearest upstream tags at that date: `v1.19.2` (stable) and
+`v1.20.0-pre`. There was no `v1.21` tag. Rebasing onto `v1.21.0` when it
+is cut is a merge of a tag that already contains this base.
+
+Remote `upstream` is https://github.com/zed-industries/zed.
+
+## Merging upstream
+
+```text
+git fetch upstream
+git merge upstream/v1.21.0
+```
+
+Conflicts are expected only in the files below. Everything else should
+apply cleanly; if it does not, the extra conflict is a defect in the
+fork surface.
+
+| File | Change |
+| --- | --- |
+| `crates/knightcode_agent/` | new crate, agent panel |
+| `crates/knightcode_models/` | new crate, completions and edit prediction |
+| `crates/knightcode_engine/` | new crate, process lifecycle and HTTP client; `report.rs` is the only place in the fork that sends an event |
+| `crates/knightcode_onboarding/` | new crate, the first-run screen |
+| `crates/agent_ui/src/agent_ui.rs` | one match arm; command-palette filter; Tab model picker module and registration |
+| `crates/agent_ui/src/edit_prediction_model_picker.rs` | new file, Tab model picker |
+| `crates/agent_ui/src/agent_panel.rs` | one string, the new-thread menu entry; the Fork Thread menu entry and `fork_thread` |
+| `crates/acp_thread/src/connection.rs` | `supports_fork_session` and `fork_session`, defaulting to unsupported |
+| `crates/agent_servers/src/acp.rs` | the fork session capability and request; the fake server advertises and answers it |
+| `crates/agent_ui/src/conversation_view.rs` | one string, the composer placeholder |
+| `crates/agent_ui/src/mention_set.rs` | unspent |
+| `crates/agent_ui/Cargo.toml` | two dependencies |
+| `crates/language_models/src/language_models.rs` | provider registration body; `register_compatible_providers` and its settings observer removed, so no `openai_compatible` or `anthropic_compatible` entry becomes a provider holding an API key |
+| `crates/language_models/Cargo.toml` | one dependency; `knightcode_engine` as a dev dependency |
+| `crates/language_models/src/provider.rs` | one log string |
+| `crates/client/src/telemetry.rs` | the events endpoint is `KNIGHTCODE_TELEMETRY_ENDPOINT`, unset in every bundle, and `flush_events_inner` returns early without it; `has_checksum_seed` dropped |
+| `crates/extension_host/src/extension_host.rs` | the update check returns early with no extensions installed, so a fresh install makes no request to the registry |
+| `crates/command_palette/src/command_palette.rs` | `humanize_action_name` displays the `zed::` namespace as `knightcode:`; the keymap editor and which-key call the same function |
+| `crates/keymap_editor/src/keymap_editor.rs` | the keybind-context language's display name |
+| `crates/settings/src/base_keymap_setting.rs` | display names only; the serialized value stays `Zed` |
+| `crates/settings_ui/src/settings_ui.rs` | the window title; the Add Provider button is not rendered |
+| `crates/settings_ui/src/pages.rs`, `crates/settings_ui/src/pages/llm_providers_page.rs` | the provider form stays compiled and unreachable behind `allow(dead_code)`; on conflict, keep ours |
+| `crates/settings_ui/src/page_data.rs`, `crates/settings_ui/src/pages/tool_permissions_setup.rs` | settings prose |
+| `crates/extensions_ui/src/extensions_ui.rs`, `crates/extensions_ui/src/components/extension_card.rs` | suggestion and compatibility strings; one line crediting the Zed extension registry |
+| `crates/agent_servers/src/acp.rs`, `crates/agent_ui/src/conversation_view/elicitation.rs`, `crates/agent_ui/src/agent_configuration/configure_context_server_modal.rs`, `crates/agent_ui/src/thread_worktree_archive.rs`, `crates/sidebar/src/sidebar.rs` | user-visible strings |
+| `crates/install_cli`, `crates/inspector_ui`, `crates/recent_projects`, `crates/sandbox`, `crates/debugger_ui`, `crates/node_runtime`, `crates/etw_tracing`, `crates/ui/src/components/collab/update_button.rs`, `crates/ui/src/components/ai/agent_setup_button.rs` | user-visible strings |
+| `crates/language_models/Cargo.toml` | one dependency |
+| `crates/settings_content/src/settings_content.rs` | one section |
+| `crates/settings/src/vscode_import.rs` | one field |
+| `crates/settings_content/src/language.rs` | one enum variant, two arms |
+| `crates/language/src/language_settings.rs` | one arm |
+| `crates/edit_prediction/src/edit_prediction.rs` | two arms |
+| `crates/edit_prediction_ui/src/edit_prediction_button.rs` | one arm |
+| `crates/edit_prediction_ui/Cargo.toml` | one dependency |
+| `crates/zed/src/zed/edit_prediction_registry.rs` | one enum variant, three arms |
+| `crates/zed/src/main.rs` | no_proxy, engine init, quit, first open; updates start only in a bundled build; the palette filter, which also hides feedback and in-tab release notes; the `APP_NAME` assert removed |
+| `crates/zed/src/zed.rs` | the About window's title, and the GPL-3 §5 notice, licence and source links below the version |
+| `crates/agent_settings/src/agent_settings.rs`, `crates/sidebar/src/sidebar_tests.rs`, `crates/zed/src/zed.rs` tests | test-only: follow the editor-layout default, or pin the agent preset where a test exercises the layout toggle |
+| `crates/zed/src/zed/app_menus.rs` | application menu name and About; the Help menu |
+| `crates/zed/Cargo.toml` | two dependencies; `agent_servers` and `command_palette_hooks` made plain dependencies; version `0.1.0`; four bundle metadata blocks |
+| `crates/zed/RELEASE_CHANNEL` | `stable` |
+| `crates/zed/KNIGHTCODE_REF` | new file, the KnightCode commit a release builds the engine from |
+| `crates/agent/src/agent.rs` | one string |
+| `crates/release_channel/src/lib.rs` | display names, instance identifiers, app ids |
+| `crates/paths/src/paths.rs` | `APP_NAME` |
+| `crates/windows_resources/src/windows_resources.rs` | product names, company, copyright |
+| `crates/util/src/util.rs` | the installed launcher's name, for git's askpass |
+| `crates/auto_update/src/auto_update.rs`, `crates/auto_update/Cargo.toml` | the feed URL and query, the release signature check and its key, the macOS and Linux bundle names, release-note links; three dependencies, and `db`'s test support so the crate's tests run on their own |
+| `crates/auto_update_ui/src/auto_update_ui.rs` | the update notification opens the release page |
+| `crates/auto_update_helper/src/` | the installed file names, the `engine` directory, strings |
+| `crates/zed/resources/*.png`, `Document.icns`, `windows/*.ico` | generated by `apps/desktop/scripts/generate-icons.py` in the KnightCode repository; on conflict, keep ours |
+| `crates/zed/resources/info/Permissions.plist`, `DocumentTypes.plist` | the application's name |
+| `crates/zed/resources/zed.desktop.in` | comment, keywords, URL scheme |
+| `crates/zed/resources/windows/zed.iss` | publisher, licence page, engine payload, no appx, URL scheme |
+| `crates/zed/resources/windows/zed.sh` | the launcher it calls |
+| `script/bundle-windows.ps1` | identity, engine staging, drops, Visual Studio and Inno Setup lookup |
+| `script/bundle-mac`, `script/bundle-linux` | identity, engine staging, drops; the copied binary is named `KnightCode` / `knightcode` so the process a user sees is ours, and the licences and `NOTICE` ship in the payload |
+| `script/install.sh`, `script/install-linux`, `script/uninstall.sh` | names and paths; no download |
+| `crates/cli/src/main.rs` | the installed executable's name, and where the app binary is resolved from |
+| `crates/auto_update/src/auto_update.rs` | the Linux install path the updater rsyncs over follows the bundle's binary name |
+| `assets/settings/default.json` | six keys — the three from WP03/WP05, plus `telemetry.metrics` and `telemetry.diagnostics` off and `auto_install_extensions` empty — the editor panel layout (file tree, outline, git and collab left; agent panel and threads sidebar right), and the product name in every comment |
+| `assets/settings/initial_user_settings.json`, `assets/keymaps/*.json` | headers and comments |
+| `assets/icons/ai_zed.svg`, `zed_agent.svg`, `zed_agent_two.svg`, `zed_src_custom.svg`, `zed_predict*.svg`, `assets/images/zed_logo.svg` | the KnightCode mark, generated by `apps/desktop/scripts/generate-icons.py` in the KnightCode repository. The file names are internal identifiers behind `IconName` and `VectorName`, so keeping them fixes every call site without a conflict; on conflict, keep ours |
+| `NOTICE`, `legal/` | the GPL-3 §5 notice, and our own terms, privacy policy and subprocessor list in place of Zed Industries' |
+| `script/check-branding.sh`, `script/branding-allowlist.txt` | new; the gate that keeps new user-visible Zed strings out |
+| `.github/workflows/knightcode.yml` | the branding gate, and the crates the test job covers |
+| `Cargo.toml` | four members, five workspace dependencies |
+| `Cargo.lock` | lockfile |
+
+Nothing in `editor`, `project`, `workspace`, `terminal`, `git`, `vim`, or
+`gpui`.
+
+After every merge, compare `acp_thread::AgentConnection` with the
+delegating `impl` in `crates/knightcode_agent/src/connection.rs`. A method
+upstream adds with a default body compiles without a delegation, and then
+the default silently disables that feature for KnightCode; add the
+delegation for every new method.
+
+## Building
+
+```text
+cargo build -p zed
+```
+
+The first build on Windows is long and the target directory is large.
+Windows prerequisites are documented in
+[`docs/src/development/windows.md`](docs/src/development/windows.md).
+The toolchain is the one pinned in `rust-toolchain.toml`. On a 16-thread,
+32 GB machine a cold build at the default job count crashed `rustc`, and a
+running Zed with it, with `0xc0000409`; `CARGO_BUILD_JOBS=4` did not.
+
+`crates/zed/RELEASE_CHANNEL` is `stable`, so a debug build identifies as
+the installed product and shares its single-instance lock. Set
+`ZED_RELEASE_CHANNEL=dev` to run one beside an installed KnightCode.
+
+## Packaging
+
+`script/bundle-windows.ps1` (an Inno Setup installer), `script/bundle-mac`
+(a `.dmg`) and `script/bundle-linux` (a tarball) build the installers. Each
+reads `KNIGHTCODE_ENGINE_DIR`, the directory `bun run build:engine` writes
+in the KnightCode repository (`packages/cli-<os>-<arch>/bin`), and ships the
+engine and its runtime assets in `engine/` beside the IDE executable.
+
+On Windows the script needs PowerShell 7 and Inno Setup 6:
+
+```powershell
+$env:KNIGHTCODE_ENGINE_DIR = "C:/path/to/knightcode/packages/cli-win32-x64/bin"
+$env:CARGO_BUILD_JOBS = "4"
+pwsh script/bundle-windows.ps1
+```
+
+It writes `target/KnightCode-x86_64.exe`.
+
+Not built, on purpose: `remote_server`, the Windows 11 shell extension, code
+signing and the Sentry upload; each script says why.
+
+## Releases and updates
+
+`.github/workflows/knightcode-release.yml` builds five installers: Windows
+x86_64, macOS aarch64 and x86_64, and Linux x86_64 and aarch64. Each carries
+the engine built from the KnightCode commit in `crates/zed/KNIGHTCODE_REF`.
+The publish job signs the SHA-256 digest of every file with the Ed25519 key
+in the `KNIGHTCODE_UPDATE_SIGNING_KEY` secret and attaches `<file>.sig` beside
+it.
+
+To release, open that workflow in the Actions tab and choose **Run workflow**
+on `main`:
+
+- **bump**: `patch`, `minor` or `major` raises `version` in
+  `crates/zed/Cargo.toml`. `current` releases the version already there, for
+  example once its prereleases have been tried.
+- **engine**: the KnightCode branch, tag or commit to build the engine from.
+  It is resolved to a commit and written to `crates/zed/KNIGHTCODE_REF`.
+- **prerelease**: publishes `v<version>-rc.N` instead, which is never offered
+  as an update.
+
+The run commits the bump to `main` as `Release v<version>`, pushes the tag,
+and builds. A stable release is created as a draft: install it from the
+release page, then publish it. Installed IDEs only see published releases.
+Pushing a `v<version>` tag by hand still builds; the tag must match `version`
+in `crates/zed/Cargo.toml`.
+
+An installed IDE asks `https://knightcode.dev/api/ide` for the newest
+release every hour. That route, in the KnightCode repository under
+`apps/web/app/api/ide`, answers with the installer of the newest
+non-prerelease release for the platform and its signature. The IDE downloads
+it, refuses it unless the signature verifies against the public key in
+`crates/auto_update/src/auto_update.rs`, and installs it the way Zed does. On
+Windows the installer stages the new files in `install\`, and
+`tools\auto_update_helper.exe` swaps them in, `engine\` included, once the
+IDE has quit. On macOS and Linux the new bundle is copied over the running
+one with `rsync`.
+
+Only a build made by a bundle script, which sets `ZED_BUNDLE`, checks for
+updates. `KNIGHTCODE_UPDATE_URL` points a build at another feed for testing;
+its releases must still carry the release key's signature. Losing that key
+means every installed IDE refuses every later update, so keep a copy outside
+GitHub.
+
+The macOS and Linux bundles are built by the release workflow and have not
+been run on a machine yet. The Linux aarch64 build runs on Ubuntu 24.04,
+because the prebuilt libwebrtc for arm64 needs GCC 14's `libgcc_s`, so it
+needs a distribution from 2024 or later.
+
+## Pointing a development build at an engine
+
+The IDE looks for `knightcode-engine` in this order: the
+`knightcode.engine_path` setting (an absolute path), the
+`KNIGHTCODE_ENGINE_PATH` environment variable, `knightcode-engine.exe`
+(Windows) or `knightcode-engine` next to the IDE executable, then the same
+name in an `engine` directory next to the IDE executable.
+
+The installers use the last one. The engine reads a `package.json`, themes,
+docs, native prebuilds and `photon_rs_bg.wasm` from beside itself, so it
+ships in its own directory rather than loose in the install root:
+
+```text
+KnightCode.exe
+engine/knightcode-engine.exe
+engine/package.json, engine/theme/, engine/docs/, ...
+```
+
+Example in the user settings file:
+
+```json
+{
+  "knightcode": {
+    "engine_path": "C:/Users/you/knightcode/packages/cli-win32-x64/bin/knightcode-engine.exe"
+  }
+}
+```
+
+## Licence
+
+The IDE is `GPL-3.0-or-later`, as any Zed fork must be; see
+[`LICENSE-GPL`](LICENSE-GPL). The engine is a separate MIT program and is
+not linked into this tree.

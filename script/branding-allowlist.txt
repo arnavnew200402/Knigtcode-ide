@@ -1,0 +1,160 @@
+# User-visible "Zed" strings that stay, each with the reason it is allowed to.
+#
+# script/check-branding.sh fails on anything here that is not listed, and on
+# anything listed that no longer exists. An upstream merge that adds a new
+# user-visible Zed string therefore lands as a failing job rather than as a
+# silent regression: fix the string, or add it below with a reason someone else
+# can check.
+#
+# Format: <path>|<the string, exactly as the scan prints it>
+#
+# The reasons fall into a handful of kinds:
+#   unreachable   — the code compiles, but nothing in a running KnightCode can
+#                   get to it. The argument is given, not asserted.
+#   off-limits    — the crate is one the fork does not touch (editor, project,
+#                   workspace, terminal, git, vim, gpui). Hidden, not edited.
+#   identifier    — a font family, a theme name, a settings value or a path: it
+#                   is configuration rather than a surface, and renaming it
+#                   breaks existing settings files for no visible gain.
+#   third party   — it names Zed Industries or their product, accurately, which
+#                   is the point.
+#   test          — test or preview code the scan's filters did not catch.
+
+# --- unreachable: Zed's own agent ------------------------------------------
+# `crates/agent` is the upstream editor's native agent. It needs a registered
+# Zed language-model provider, and `language_models::init` registers exactly one
+# provider, KnightCode's. Asserted by
+# language_models::tests::test_only_knightcode_is_registered_whatever_the_settings_say.
+crates/agent/src/templates.rs|"You are the Zed coding agent"
+crates/agent/src/tools/terminal_tool.rs|"Could not select a Linux Zed release for WSL sandboxing"
+
+# --- unreachable: thread feedback ------------------------------------------
+# `is_thread_feedback_enabled` requires `connection().telemetry().is_some()`.
+# `AgentConnection::telemetry` defaults to `None` (crates/acp_thread/src/connection.rs),
+# `AcpConnection` does not override it, and KnightCodeConnection delegates to it,
+# so the rating buttons never render for a KnightCode thread.
+crates/agent_ui/src/completion_provider.rs|"Rate this response as helpful. Sends the current conversation to the Zed team."
+crates/agent_ui/src/completion_provider.rs|"Rate this response as not helpful. Sends the current conversation to the Zed team."
+crates/agent_ui/src/conversation_view/thread_view.rs|"Rating the thread sends all of your current conversation to the Zed team."
+
+# --- unreachable: the Zed Pro upsell ---------------------------------------
+# Every one of these is an arm of a cloud plan, reached only through the Zed
+# cloud provider, which is not registered. `crates/ai_onboarding` is the upsell
+# itself and has no other caller.
+crates/agent_ui/src/conversation_view/thread_view.rs|"You reached your free usage limit. Upgrade to Zed Pro for more prompts."
+crates/agent_ui/src/ui/end_trial_upsell.rs|"Upgrade to Zed Pro"
+crates/agent_ui/src/ui/end_trial_upsell.rs|"Your Zed Pro Trial has expired"
+crates/ai_onboarding/src/ai_onboarding.rs|"Welcome to the Zed Pro Trial"
+crates/ai_onboarding/src/ai_onboarding.rs|"Welcome to Zed AI"
+crates/ai_onboarding/src/ai_onboarding.rs|"Welcome to Zed Business"
+crates/ai_onboarding/src/ai_onboarding.rs|"Welcome to Zed Pro"
+crates/ai_onboarding/src/ai_onboarding.rs|"Welcome to Zed Student"
+crates/ai_onboarding/src/ai_onboarding.rs|"Welcome to Zed VIP"
+crates/ai_onboarding/src/plan_definitions.rs|"$10 of tokens in Zed agent"
+crates/ai_onboarding/src/plan_definitions.rs|"$5 of tokens in Zed agent"
+crates/ai_onboarding/src/plan_definitions.rs|"Tokens in the Zed agent"
+crates/language_models/src/provider/cloud.rs|"Business Plan - Zed models disabled"
+crates/language_models/src/provider/cloud.rs|"Business Plan - Zed models enabled"
+crates/language_models/src/provider/cloud.rs|"Failed to sign in with your Zed account (401)."
+crates/language_models/src/provider/cloud.rs|"Sign In to use Zed AI"
+crates/language_models/src/provider/cloud.rs|"Zed Pro Plan"
+crates/language_models/src/provider/cloud.rs|"Zed Pro Trial Plan"
+crates/edit_prediction_ui/src/edit_prediction_button.rs|"Upgrade to Zed Pro or contact us."
+
+# --- unreachable: providers that are never registered -----------------------
+crates/edit_prediction/src/edit_prediction.rs|"You must update to Zed version {minimum_version} or higher to continue using edit predictions."
+crates/language_models/src/provider/mistral.rs|"[Tool responded with an image, but Zed doesn't support these in Mistral models yet]"
+crates/settings_ui/src/pages/llm_providers_page.rs|"Or set the {env_var_name} env var and restart Zed for it to take effect."
+# Known residual, recorded rather than hidden: `edit_predictions.provider: "zed"`
+# is still an accepted settings value and this page still describes it. It needs
+# a Zed account to do anything, and KnightCode never offers one. Removing the
+# provider is a behaviour change this work package did not take on.
+crates/settings_ui/src/pages/edit_prediction_provider_setup.rs|"Zed Predictions"
+crates/settings_content/src/language.rs|"Zed AI"
+
+# --- unreachable: collaboration --------------------------------------------
+# Collab needs a signed-in zed.dev account, and nothing in KnightCode signs in:
+# `client::SignIn` is hidden, the title-bar sign-in button is off
+# (`title_bar.show_sign_in` is false in default.json), and the startup
+# `authenticate` call was removed in crates/zed/src/main.rs.
+crates/title_bar/src/collab.rs|"{:?}\n\nPlease check that you have given Zed permissions to record your screen in Settings."
+crates/title_bar/src/title_bar.rs|"Please restart Zed to Collaborate"
+crates/title_bar/src/title_bar.rs|"Please update Zed to Collaborate"
+crates/workspace/src/pane_group.rs|"{} is viewing an unshared Zed project"
+
+# --- unreachable: Zed's onboarding and welcome pages ------------------------
+# `zed_actions::OpenOnboarding` and `onboarding::ShowWelcome` are in the palette
+# hide list and out of the Help menu; KnightCode's own first run replaced them.
+# The crate stays compiled and unedited, which is cheaper on every merge.
+# Asserted by zed::hidden_action_tests::every_zed_facing_action_is_hidden.
+crates/onboarding/src/basics_page.rs|"Help fix Zed by sending crash reports so we can fix critical issues fast"
+crates/onboarding/src/basics_page.rs|"Help improve Zed by sending anonymous usage data"
+crates/onboarding/src/basics_page.rs|"Welcome Zed Agent Sign In Clicked"
+crates/onboarding/src/basics_page.rs|"Zed Agent"
+crates/onboarding/src/basics_page.rs|"Zed can only allow services like language servers, project settings, and MCP servers to run after you mark a new project as trusted."
+
+# --- unreachable: the dead usage pipeline -----------------------------------
+# Property descriptions on `telemetry::event!` calls. No KnightCode build sets
+# KNIGHTCODE_TELEMETRY_ENDPOINT, so `flush_events_inner` returns before building
+# a request. Asserted by client::telemetry::tests::test_no_request_without_an_endpoint.
+crates/zed/src/reliability.rs|"A GPU found on the users system. May or may not be the GPU Zed is running on"
+crates/zed/src/reliability.rs|"The GPU Zed is running on"
+
+# --- off-limits crates ------------------------------------------------------
+# editor, project, workspace and gpui are not in the fork surface. Each of these
+# is a message from a path KnightCode does not change.
+crates/editor/src/editor.rs|"The remote instance of Zed does not support this yet. It must be upgraded to {}"
+crates/project/src/project_settings.rs|"converting VSCode debug tasks into Zed ones, file {abs_path:?}"
+crates/project/src/project_settings.rs|"converting VSCode tasks into Zed ones, file {abs_path:?}"
+crates/project/src/project_settings.rs|"serializing Zed tasks into JSON, file {abs_path:?}"
+crates/workspace/src/notifications.rs|"An update is required to continue using Zed AI."
+crates/workspace/src/notifications.rs|"Zed needs an xdg-desktop-portal implementation to open files."
+crates/gpui_windows/src/platform.rs|"C:\Zed Data"
+
+# --- identifiers: font families, theme names, settings values, paths --------
+# Renaming any of these changes a value users already have in settings.json, or
+# a family name the bundled fonts are registered under.
+crates/gpui/src/text_system.rs|"Zed Plex Mono"
+crates/gpui/src/text_system.rs|"Zed Plex Sans"
+crates/gpui/src/text_system.rs|"Zed Plex"
+crates/markdown/src/mermaid.rs|"Zed Plex Sans"
+crates/migrator/src/migrator.rs|"Zed Mono"
+crates/migrator/src/migrator.rs|"Zed Sans"
+crates/theme/src/fallback_themes.rs|"Zed Default"
+crates/theme/src/icon_theme.rs|"Zed (Default)"
+crates/ui/src/components/image.rs|"Zed X Copilot"
+crates/auto_update_helper/src/auto_update_helper.rs|"C:\Zed Data"
+crates/auto_update_helper/src/updater.rs|"C:\Zed Data"
+crates/settings/src/keymap_file.rs|"Zed > Editor && some_condition = true"
+
+# --- third party, named accurately ------------------------------------------
+# The extension author really is Zed Industries; the registry really is Zed's;
+# the copyright line is the attribution GPL-3 asks for and Task 8 extends.
+crates/extensions_ui/src/components/extension_card.rs|"Zed Industries"
+crates/extensions_ui/src/extensions_ui.rs|"Extensions come from the Zed extension registry. Searching this page                              and installing an extension sends a request to zed.dev."
+# The About window's notice, which is the whole point of Task 8: GPL-3 §5(a)
+# and §5(b) ask a modified version to say what it is, in the place a user looks.
+crates/zed/src/zed.rs|"KnightCode is built on Zed, is licensed GPL-3.0-or-later,                                      and is not affiliated with or endorsed by Zed Industries, Inc."
+crates/zed/src/zed.rs|"Zed source"
+crates/windows_resources/src/windows_resources.rs|"Copyright 2026 KnightCodeAI. Portions copyright 2022 - 2025 Zed Industries, Inc.\0"
+# The troubleshooting page for a window that will not open is Zed's, and saying
+# so is more use to someone staring at a blank screen than hiding it.
+crates/zed/src/main.rs|"KnightCode failed to open a window: {e:?}. See https://zed.dev/docs/linux for troubleshooting steps (KnightCode is built on the Zed editor)."
+
+# --- test and preview code the filters miss ---------------------------------
+crates/remote/src/transport/ssh.rs|"/tmp/Zed "
+crates/remote/src/transport/ssh.rs|"/tmp/Zed \\\"
+crates/remote/src/transport/ssh.rs|"/tmp/Zed Repro/remote_server"
+crates/remote/src/transport/ssh.rs|"/tmp/Zed Repro/remote_server\"
+crates/remote/src/transport/ssh.rs|"C:\\\\Users\\\\Smit\\\\Zed Repro\\\\remote_server\"
+crates/remote/src/transport/ssh.rs|"C:\Users\Smit\Zed Repro\remote_server"
+crates/settings/src/settings_store.rs|"Zed Icons"
+crates/settings/src/settings_store.rs|"Zed Mono"
+crates/settings_ui/src/pages/llm_providers_page.rs|"Zed AI configuration should be rendered"
+crates/task/src/task_template.rs|"If any of the Zed task variables is not substituted, the task should not be resolved, but got some resolution without the variable {removed_variable:?} (index {i})"
+crates/task/src/vscode_debug_format.rs|"converting to Zed debug templates"
+crates/ui/src/components/list/list_bullet_item.rs|"Create a Zed account by"
+crates/workspace/src/notifications.rs|"A new version of Zed is available for download."
+crates/workspace/src/workspace.rs|"Zed — root1, root2 — one — {expected_file_path}"
+crates/workspace/src/workspace.rs|"Zed — root1, root2"
+crates/zed/src/visual_test_runner.rs|"Show me the Zed logo"

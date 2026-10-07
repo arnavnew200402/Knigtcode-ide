@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+
+set -euxo pipefail
+source script/lib/blob-store.sh
+
+# Function for displaying help info
+help_info() {
+  echo "
+Usage: ${0##*/} [options]
+Build a release .tar.gz for Linux.
+
+KNIGHTCODE_ENGINE_DIR must name the directory 'bun run build:engine' writes
+for this target (packages/cli-linux-<arch>/bin in the KnightCode repository).
+
+Options:
+  -h, --help     Display this help and exit.
+  --flatpak      Set ZED_BUNDLE_TYPE=flatpak so that this can be included in system info
+  "
+}
+
+# Parse all arguments manually
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            help_info
+            exit 0
+            ;;
+        --flatpak)
+            export ZED_BUNDLE_TYPE=flatpak
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            help_info
+            exit 1
+            ;;
+        *)
+            echo "Error: Unexpected argument: $1" >&2
+            help_info
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "${KNIGHTCODE_ENGINE_DIR:-}" || ! -f "${KNIGHTCODE_ENGINE_DIR}/knightcode-engine" ]]; then
+    echo "KNIGHTCODE_ENGINE_DIR must name a directory containing knightcode-engine and its runtime assets (bun run scripts/build.ts --engine --target=linux-<arch>)." >&2
+    exit 1
+fi
+
+export ZED_BUNDLE=true
+
+channel=$(<crates/zed/RELEASE_CHANNEL)
+target_dir="${CARGO_TARGET_DIR:-target}"
+
+version="$(script/get-crate-version zed)"
+# Set RELEASE_VERSION so it's compiled into GPUI and it knows about the version.
+export RELEASE_VERSION="${version}"
+
+commit=$(git rev-parse HEAD | cut -c 1-7)
+
+version_info=$(rustc --version --verbose)
+host_line=$(echo "$version_info" | grep host)
+target_triple=${host_line#*: }
+
+# Generate the licenses first, so they can be baked into the binaries
+script/generate-licenses
+
+export CC=${CC:-$(which clang)}
+
+# Build binary in release mode
+# We need lld to link libwebrtc.a successfully on aarch64-linux.
+# NOTE: Since RUSTFLAGS env var overrides all .cargo/config.toml rustflags
+# (see https://github.com/rust-lang/cargo/issues/5376), the
+# [target.aarch64-unknown-linux-gnu] section in config.toml has no effect here.
+if [[ "$(uname -m)" == "aarch64" ]]; then
+    export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=lld -C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
+else
+    export RUSTFLAGS="${RUSTFLAGS:-} -C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
+fi
+cargo --config .cargo/bundle-config.toml build --release --target "${target_triple}" --package zed --package cli
+
+# Not built, on purpose: remote_server, a separate archive for SSH remoting
+# with no release feed to serve it from. No Sentry upload either: it targets
+# Zed's Sentry organisation.
+
+# Split debug symbols into a local .dbg file, then strip debug info and local
+# symbols from the shipped binaries.
+# We use llvm-objcopy because GNU objcopy on older distros (e.g. Ubuntu 20.04)
+# doesn't understand CREL sections produced by newer LLVM.
+llvm-objcopy --only-keep-debug "${target_dir}/${target_triple}/release/zed" "${target_dir}/${target_triple}/release/zed.dbg"
+llvm-objcopy --strip-debug --discard-all "${target_dir}/${target_triple}/release/zed"
+llvm-objcopy --strip-debug --discard-all "${target_dir}/${target_triple}/release/cli"
+
+suffix=""
+if [ "$channel" != "stable" ]; then
+  suffix="-$channel"
+fi
+
+# Move everything that should end up in the final package
+# into a temp directory.
+temp_dir=$(mktemp -d)
+zed_dir="${temp_dir}/knightcode$suffix.app"
+
+# Binary
+mkdir -p "${zed_dir}/bin" "${zed_dir}/libexec"
+# The cargo bin target stays `zed`; the process `ps` shows is the name of
+# this copy. crates/cli resolves it by the same name.
+cp "${target_dir}/${target_triple}/release/zed" "${zed_dir}/libexec/knightcode"
+# The PATH launcher is knightcode-ide: the KnightCode CLI already owns knightcode.
+cp "${target_dir}/${target_triple}/release/cli" "${zed_dir}/bin/knightcode-ide"
+
+# The engine and the runtime assets it reads from beside itself. The IDE finds
+# it in engine/ next to its own executable; the CLI binary is not shipped.
+mkdir -p "${zed_dir}/libexec/engine"
+cp -R "${KNIGHTCODE_ENGINE_DIR}/." "${zed_dir}/libexec/engine/"
+rm -f "${zed_dir}/libexec/engine/knightcode"
+
+# Libs
+# Bundle libstdc++ so older supported systems can run binaries built with our
+# toolchain even when their system libstdc++.so.6 lacks required GLIBCXX symbols.
+#
+# Never bundle the GLib family or its private dependencies: host libraries that
+# get dlopen'd are built against the system GLib, and resolving them against an
+# older bundled copy fails with missing symbols.
+find_libs() {
+    ldd ${target_dir}/${target_triple}/release/zed |\
+        cut -d' ' -f3 |\
+        grep -v '\<\(libc.so\|libgcc_s.so\|libm.so\|libpthread.so\|libdl.so\|libasound.so\)' |\
+        grep -v '\<\(libglib-2.0.so\|libgobject-2.0.so\|libgio-2.0.so\|libgmodule-2.0.so\|libpcre.so\|libpcre2-8.so\|libmount.so\|libblkid.so\|libselinux.so\|libffi.so\|libresolv.so\|libz.so\)'
+}
+
+mkdir -p "${zed_dir}/lib"
+rm -rf "${zed_dir}/lib/*"
+cp $(find_libs) "${zed_dir}/lib"
+
+# Icons
+mkdir -p "${zed_dir}/share/icons/hicolor/512x512/apps"
+cp "crates/zed/resources/app-icon$suffix.png" "${zed_dir}/share/icons/hicolor/512x512/apps/knightcode.png"
+mkdir -p "${zed_dir}/share/icons/hicolor/1024x1024/apps"
+cp "crates/zed/resources/app-icon$suffix@2x.png" "${zed_dir}/share/icons/hicolor/1024x1024/apps/knightcode.png"
+
+# .desktop
+# APP_ID matches release_channel::app_id(), which the IDE's windows carry, or
+# the desktop does not pair a window with this entry and its icon.
+export DO_STARTUP_NOTIFY="true"
+export APP_CLI="knightcode-ide"
+export APP_ICON="knightcode"
+export APP_ARGS="%U"
+if [[ "$channel" == "preview" ]]; then
+  export APP_NAME="KnightCode Preview"
+  APP_ID="dev.knightcode.KnightCode-Preview"
+elif [[ "$channel" == "nightly" ]]; then
+  export APP_NAME="KnightCode Nightly"
+  APP_ID="dev.knightcode.KnightCode-Nightly"
+elif [[ "$channel" == "dev" ]]; then
+  export APP_NAME="KnightCode Dev"
+  APP_ID="dev.knightcode.KnightCode-Dev"
+else
+  export APP_NAME="KnightCode"
+  APP_ID="dev.knightcode.KnightCode"
+fi
+
+mkdir -p "${zed_dir}/share/applications"
+envsubst < "crates/zed/resources/zed.desktop.in" > "${zed_dir}/share/applications/$APP_ID.desktop"
+chmod +x "${zed_dir}/share/applications/$APP_ID.desktop"
+
+# Copy generated licenses so they'll end up in archive too
+cp "assets/licenses.md" "${zed_dir}/licenses.md"
+
+# GPL-3 §4 and §5 ask a distributor to ship the licence and the notices with the
+# work. The Windows installer already shows LICENSE-GPL as its licence page.
+cp "LICENSE-GPL" "${zed_dir}/LICENSE-GPL"
+cp "LICENSE-APACHE" "${zed_dir}/LICENSE-APACHE"
+cp "NOTICE" "${zed_dir}/NOTICE"
+cp "assets/themes/LICENSES" "${zed_dir}/THEME-LICENSES"
+
+# Create archive out of everything that's in the temp directory
+arch=$(uname -m)
+archive="knightcode-linux-${arch}.tar.gz"
+
+rm -rf "${archive}"
+remove_match="knightcode(-[a-zA-Z0-9]+)?-linux-$(uname -m)\.tar\.gz"
+ls "${target_dir}/release" | grep -E ${remove_match} | xargs -d "\n" -I {} rm -f "${target_dir}/release/{}" || true
+tar -czvf "${target_dir}/release/$archive" -C ${temp_dir} "knightcode$suffix.app"

@@ -1,0 +1,21 @@
+// KnightCode keymap
+//
+// KnightCode is built on the Zed editor, so key binding syntax is
+// documented in Zed's reference: https://zed.dev/docs/key-bindings
+//
+// To see the default key bindings run `knightcode: open default keymap`
+// from the command palette.
+[
+  {
+    "context": "Workspace",
+    "bindings": {
+      // "shift shift": "file_finder::Toggle"
+    },
+  },
+  {
+    "context": "Editor && vim_mode == insert",
+    "bindings": {
+      // "j k": "vim::NormalBefore"
+    },
+  },
+]

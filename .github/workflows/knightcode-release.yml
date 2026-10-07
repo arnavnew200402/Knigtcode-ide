@@ -1,0 +1,278 @@
+# Builds the installers for a release, signs them, and publishes them as a
+# GitHub Release. knightcode.dev/api/ide serves the newest published
+# non-prerelease release to installed IDEs as their update.
+#
+# Run it from the Actions tab ("Run workflow"): it bumps the version and the
+# engine commit on main, tags, and builds. A pushed v* tag builds too. Either
+# way a stable release lands as a draft, and nothing reaches installed IDEs
+# until someone publishes it.
+name: knightcode-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version: the next patch, minor or major, or the current one"
+        type: choice
+        options: [patch, minor, major, current]
+        default: patch
+      engine:
+        description: "KnightCode branch, tag or commit whose engine the installers carry"
+        type: string
+        default: main
+      prerelease:
+        description: "Publish v<version>-rc.N, a prerelease never offered as an update"
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: knightcode-release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # The public half of KNIGHTCODE_UPDATE_SIGNING_KEY, the key RELEASE_SIGNING_KEY
+  # in crates/auto_update/src/auto_update.rs holds. Every installed IDE refuses a
+  # release signed by any other key, so publishing checks that the two agree.
+  RELEASE_PUBLIC_KEY: h+KXYCPEMd8NFDGnGoSXCJR6dB24grbCahb3QH3F7S0=
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      # Run workflow commits the bump to main and pushes the tag.
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ steps.version.outputs.sha }}
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      engine: ${{ steps.version.outputs.engine }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - id: version
+        name: Settle the tag, the version and the engine commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUMP: ${{ inputs.bump }}
+          ENGINE: ${{ inputs.engine }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          current="$(grep -m1 '^version = ' crates/zed/Cargo.toml | cut -d '"' -f2)"
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+              echo "Run the release from main, not $GITHUB_REF_NAME" >&2
+              exit 1
+            fi
+            IFS=. read -r major minor patch <<< "$current"
+            case "$BUMP" in
+              current) version="$current" ;;
+              patch) version="$major.$minor.$((patch + 1))" ;;
+              minor) version="$major.$((minor + 1)).0" ;;
+              major) version="$((major + 1)).0.0" ;;
+            esac
+
+            engine="$(gh api "repos/KnightCodeAI/knightcode/commits/$ENGINE" --jq .sha)"
+            if ! [[ "$engine" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "No KnightCode commit named $ENGINE" >&2
+              exit 1
+            fi
+
+            if [ "$PRERELEASE" = "true" ]; then
+              previous="$(git ls-remote --tags origin "refs/tags/v$version-rc.*" | wc -l)"
+              tag="v$version-rc.$((previous + 1))"
+            else
+              tag="v$version"
+            fi
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+              echo "$tag already exists" >&2
+              exit 1
+            fi
+
+            sed -i "0,/^version = \".*\"$/s//version = \"$version\"/" crates/zed/Cargo.toml
+            sed -i "/^name = \"zed\"$/{n;s/^version = \".*\"$/version = \"$version\"/}" Cargo.lock
+            printf '%s\n' "$engine" > crates/zed/KNIGHTCODE_REF
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add crates/zed/Cargo.toml Cargo.lock crates/zed/KNIGHTCODE_REF
+            if ! git diff --cached --quiet; then
+              git commit -m "Release $tag" -m "Engine: KnightCodeAI/knightcode@$engine" -m "Run by @$GITHUB_ACTOR."
+            fi
+            git tag "$tag"
+            # One push, so main never carries a bump without its tag or the reverse.
+            git push --atomic origin HEAD:main "refs/tags/$tag"
+          else
+            tag="$GITHUB_REF_NAME"
+            version="${tag#v}"
+            version="${version%%-*}"
+            if [ "$version" != "$current" ]; then
+              echo "Tag $tag does not match version $current in crates/zed/Cargo.toml" >&2
+              exit 1
+            fi
+            engine="$(tr -d '[:space:]' < crates/zed/KNIGHTCODE_REF)"
+          fi
+
+          # v0.2.0-rc.1 is a prerelease of 0.2.0: published, never offered as an update.
+          if [ "$tag" = "v$version" ]; then prerelease=false; else prerelease=true; fi
+          {
+            echo "tag=$tag"
+            echo "sha=$(git rev-parse HEAD)"
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "engine=$engine"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag ($(git rev-parse --short HEAD)) with engine KnightCodeAI/knightcode@$engine" >> "$GITHUB_STEP_SUMMARY"
+
+  bundle:
+    needs: version
+    name: bundle (${{ matrix.engine }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows
+            runner: windows-2022
+            engine: win32-x64
+            artifact: target/KnightCode-x86_64.exe
+          - os: macos
+            runner: macos-15
+            engine: darwin-arm64
+            triple: aarch64-apple-darwin
+            artifact: target/aarch64-apple-darwin/release/KnightCode-aarch64.dmg
+          - os: macos
+            runner: macos-15
+            engine: darwin-x64
+            triple: x86_64-apple-darwin
+            artifact: target/x86_64-apple-darwin/release/KnightCode-x86_64.dmg
+          - os: linux
+            runner: ubuntu-22.04
+            engine: linux-x64
+            artifact: target/release/knightcode-linux-x86_64.tar.gz
+          # 24.04, not 22.04: the prebuilt libwebrtc for arm64 calls
+          # __arm_tpidr2_save, which only GCC 14's libgcc_s exports. The
+          # binary therefore needs a 2024-or-newer distribution on arm64.
+          - os: linux
+            runner: ubuntu-24.04-arm
+            engine: linux-arm64
+            artifact: target/release/knightcode-linux-aarch64.tar.gz
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    env:
+      KNIGHTCODE_ENGINE_DIR: ${{ github.workspace }}/knightcode/packages/cli-${{ matrix.engine }}/bin
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      # The tagged commit, which for Run workflow is the bump made above.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          repository: KnightCodeAI/knightcode
+          ref: ${{ needs.version.outputs.engine }}
+          path: knightcode
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.3
+
+      - name: Build the engine
+        working-directory: knightcode
+        shell: bash
+        run: |
+          bun install
+          bun run scripts/build.ts --engine --target=${{ matrix.engine }}
+
+      - name: Install the pinned toolchain
+        run: rustup show
+
+      - name: Install the Linux build dependencies
+        if: matrix.os == 'linux'
+        run: |
+          ./script/linux
+          ./script/download-wasi-sdk
+          echo "CC=clang" >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> "$GITHUB_ENV"
+
+      - name: Bundle for Windows
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: script/bundle-windows.ps1
+
+      - name: Bundle for macOS
+        if: matrix.os == 'macos'
+        run: script/bundle-mac ${{ matrix.triple }}
+
+      - name: Bundle for Linux
+        if: matrix.os == 'linux'
+        run: script/bundle-linux
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.engine }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+
+  publish:
+    needs: [version, bundle]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Sign every installer
+        env:
+          SIGNING_KEY: ${{ secrets.KNIGHTCODE_UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/release-signing-key.pem"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$SIGNING_KEY" > "$key"
+          public="$(openssl pkey -in "$key" -pubout -outform DER | tail -c 32 | base64 -w0)"
+          if [ "$public" != "$RELEASE_PUBLIC_KEY" ]; then
+            echo "KNIGHTCODE_UPDATE_SIGNING_KEY is not the key installed IDEs trust" >&2
+            exit 1
+          fi
+          # The signature covers the SHA-256 digest, which is what the IDE checks.
+          for file in assets/*; do
+            openssl dgst -sha256 -binary "$file" > "$RUNNER_TEMP/digest"
+            openssl pkeyutl -sign -inkey "$key" -rawin -in "$RUNNER_TEMP/digest" -out "$RUNNER_TEMP/signature"
+            base64 -w0 "$RUNNER_TEMP/signature" > "$file.sig"
+          done
+          ls -l assets
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          ENGINE: ${{ needs.version.outputs.engine }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          flags=(--title "KnightCode $TAG" --notes "Engine: KnightCodeAI/knightcode@$ENGINE" --generate-notes)
+          # A stable release is a draft until someone publishes it, and the
+          # update feed skips drafts, so no installed IDE sees it before then.
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); else flags+=(--draft); fi
+          gh release create "$TAG" assets/* --repo "$GITHUB_REPOSITORY" "${flags[@]}"
+          url="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url)"
+          if [ "$PRERELEASE" = "true" ]; then
+            echo "Published prerelease $TAG: $url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Draft release $TAG is ready. Install it, then publish it to ship the update: $url" >> "$GITHUB_STEP_SUMMARY"
+          fi

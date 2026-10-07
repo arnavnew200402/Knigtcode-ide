@@ -1,0 +1,19 @@
+// KnightCode settings
+//
+// KnightCode is built on the Zed editor, so every editor setting below is
+// documented in Zed's reference: https://zed.dev/docs/configuring-zed
+// KnightCode's own settings — sign-in, model choice, the engine — are
+// documented at https://knightcode.dev/docs/ide
+//
+// To see all of KnightCode's default settings without changing your
+// custom settings, run `knightcode: open default settings` from the
+// command palette (cmd-shift-p / ctrl-shift-p)
+{
+  "ui_font_size": 16,
+  "buffer_font_size": 15,
+  "theme": {
+    "mode": "dark",
+    "light": "One Light",
+    "dark": "KnightCode Copper",
+  },
+}

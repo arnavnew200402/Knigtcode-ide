@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "architecture": "x64",
+  "reviewed_on": "2026-10-04",
+  "webview2": {
+    "version": "154.0.4258.53",
+    "format": "cab",
+    "url": "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/0b89c3a3-0043-4746-b39e-65830da7744d/Microsoft.WebView2.FixedVersionRuntime.154.0.4258.53.x64.cab",
+    "sha256": "ec12b2db6423d127fb8e1935d34e2e68abc70fe8ecb1f6162ba1c1ccc2825f6d",
+    "bytes": 307996323,
+    "authenticode_thumbprint": "4028CAD637509D4744B17EC5B42AED8D7A31E6AF",
+    "inventory_sha256": "4ece64d8478c03461a78b1851da55f24d3b79277457ce616c43a584b03ec1ce9",
+    "verification": {
+      "source": "https://developer.microsoft.com/en-us/microsoft-edge/webview2/",
+      "digest_basis": "Computed from the official Microsoft CAB. No independently published SHA-256 was found.",
+      "authenticity": "Windows Get-AuthenticodeSignature returned Valid for the CAB, msedgewebview2.exe and msedge.dll.",
+      "signer": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+      "issuer": "CN=Microsoft Code Signing PCA 2024, O=Microsoft Corporation, C=US"
+    },
+    "required_files": [
+      {
+        "path": "msedgewebview2.exe",
+        "sha256": "30285e24a33be3c0b2d0a7c3909fa1cc21d2fc0f0c2ab4eb79e46a9304b4256d"
+      },
+      {
+        "path": "msedge.dll",
+        "sha256": "0203543127df71e7721fed2eef97447d32931a08f86b93f0f261b423b4af499a"
+      }
+    ]
+  },
+  "speech": {
+    "model": "tiny.en",
+    "license": "MIT",
+    "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin",
+    "sha256": "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+    "bytes": 77704715,
+    "verification": {
+      "source": "https://huggingface.co/ggerganov/whisper.cpp/raw/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin",
+      "digest_basis": "Independent repository Git LFS pointer: oid sha256 and size; downloaded bytes matched both."
+    }
+  },
+  "notices": [
+    {
+      "file": "WebView2.txt",
+      "format": "webview2-fixed-eula-json",
+      "url": "https://developer.microsoft.com/microsoft-edge/api/eula/webview2?locale=en-us&fixed=true",
+      "sha256": "a5747bb22a9e76875abdc7c01b2f271999330f86ec878515bdbdd40dbfc1bee8",
+      "bytes": 25671,
+      "output_sha256": "9d2b875c76746a5262a2a9628a2237f036b5d8c110b0eb8dc3c0990ea5fd51b2",
+      "output_bytes": 16468,
+      "verification": "Official fixed-runtime license endpoint linked by Microsoft's download-page code. Response and deterministic plain-text rendering hashed locally; no published SHA-256. Changed endpoint bytes fail closed."
+    },
+    {
+      "file": "WebView2Loader.txt",
+      "format": "zip-entry",
+      "version": "1.0.3800.47",
+      "url": "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.3800.47/microsoft.web.webview2.1.0.3800.47.nupkg",
+      "sha256": "56c9f26bdd07916a2d1949fb58a5c7e434dfa1173577dca879206050c4e718db",
+      "bytes": 8973762,
+      "entry": "LICENSE.txt",
+      "output_sha256": "0af8f1b807512aae39c2ac1aa4d0cae65cabecb6fd554b8439a5162a0d6eca55",
+      "output_bytes": 1487,
+      "verification": "Official Microsoft NuGet package; LICENSE.txt agrees with the versioned NuGet License page. SHA-256 computed locally. Loader version confirmed against webview2-com-sys 0.39.1's shipped DLL and upstream SDK pin."
+    },
+    {
+      "file": "WebView2Loader-NOTICE.txt",
+      "format": "zip-entry",
+      "version": "1.0.3800.47",
+      "url": "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.3800.47/microsoft.web.webview2.1.0.3800.47.nupkg",
+      "sha256": "56c9f26bdd07916a2d1949fb58a5c7e434dfa1173577dca879206050c4e718db",
+      "bytes": 8973762,
+      "entry": "NOTICE.txt",
+      "output_sha256": "106423785c5b7eba0a8e61d1837f2132e9c828e20ad530f565d981c1df60dd90",
+      "output_bytes": 3894,
+      "verification": "Unmodified NOTICE.txt from the same official Microsoft SDK package; SHA-256 computed locally."
+    },
+    {
+      "file": "Whisper.txt",
+      "format": "text",
+      "url": "https://raw.githubusercontent.com/openai/whisper/86098128c0b4f24f0e2aa2994de830614b474227/LICENSE",
+      "sha256": "b5d65a59060e68c4ff940e1eddfa6f94b2d68fdf58ed7f4dd57721c997e35e9d",
+      "bytes": 1063,
+      "output_sha256": "b5d65a59060e68c4ff940e1eddfa6f94b2d68fdf58ed7f4dd57721c997e35e9d",
+      "output_bytes": 1063,
+      "verification": "Immutable official OpenAI Whisper MIT license; SHA-256 computed from downloaded bytes."
+    },
+    {
+      "file": "WhisperCpp.txt",
+      "format": "text",
+      "version": "1.8.3",
+      "url": "https://raw.githubusercontent.com/ggml-org/whisper.cpp/2eeeba56e9edd762b4b38467bab96c2517163158/LICENSE",
+      "sha256": "e562a2ddfaf8280537795ac5ecd34e3012b6582a147ef69ba6a6a5c08c84757d",
+      "bytes": 1078,
+      "output_sha256": "e562a2ddfaf8280537795ac5ecd34e3012b6582a147ef69ba6a6a5c08c84757d",
+      "output_bytes": 1078,
+      "verification": "Official whisper.cpp v1.8.3 immutable revision; must match the license bundled in whisper-rs-sys 0.15.0. SHA-256 computed locally."
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+name: build-windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+  ZED_WORKSPACE: ${{ github.workspace }}
+  KNIGHTCODE_ENGINE_DIR: ${{ github.workspace }}/knightcode/packages/cli-win32-x64/bin
+  KNIGHTCODE_DESKTOP_RESOURCES_DIR: ${{ github.workspace }}/target/resources/desktop
+
+jobs:
+  build:
+    name: Build Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Check out the IDE
+        uses: actions/checkout@v4
+
+      - name: Read the pinned engine revision
+        id: engine-ref
+        shell: pwsh
+        run: |
+          $ref = (Get-Content crates/zed/KNIGHTCODE_REF -Raw).Trim()
+          if ($ref -notmatch '^[0-9a-f]{40}$') {
+            throw "KNIGHTCODE_REF is not a commit SHA: $ref"
+          }
+          "ref=$ref" >> $env:GITHUB_OUTPUT
+
+      - name: Check out the matching KnightCode engine
+        uses: actions/checkout@v4
+        with:
+          repository: KnightCodeAI/knightcode
+          ref: ${{ steps.engine-ref.outputs.ref }}
+          path: knightcode
+          persist-credentials: false
+
+      # The engine requires Node >=22. The repository uses Bun for installation
+      # and packaging, but npm's download cache is retained for Node tooling.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\npm-cache
+          key: ${{ runner.os }}-npm-${{ hashFiles('knightcode/package.json', 'knightcode/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.3
+
+      - name: Cache Bun downloads
+        uses: actions/cache@v4
+        with:
+          path: ~\.bun\install\cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('knightcode/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Build the KnightCode engine
+        working-directory: knightcode
+        shell: pwsh
+        run: |
+          bun install --frozen-lockfile
+          # The provider JSON catalogs are generated from the live model data
+          # and are intentionally not committed to the engine repository.
+          bun run hydrate:model-data
+          bun run scripts/build.ts --engine --target=win32-x64
+
+      - name: Install the pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1-x86_64-pc-windows-msvc
+          components: rustfmt, clippy, rust-analyzer, rust-src
+          targets: wasm32-wasip2, wasm32-unknown-unknown, x86_64-unknown-linux-musl
+
+      - name: Cache Cargo dependencies and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          cache-target: true
+          cache-on-failure: true
+
+      - name: Install Windows packaging prerequisites
+        shell: pwsh
+        run: |
+          choco install --no-progress --yes nasm llvm cmake innosetup
+          $nasm = Join-Path $env:ProgramData 'chocolatey\bin'
+          "$nasm" >> $env:GITHUB_PATH
+
+      - name: Acquire verified desktop resources
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path target/resources | Out-Null
+          script/acquire-desktop-resources.ps1 `
+            -OutputDirectory target/resources/desktop `
+            -ExpectedArchitecture x64
+
+      - name: Set bundle version
+        shell: pwsh
+        run: |
+          $version = (& script/get-crate-version.ps1 zed).Trim()
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw 'Could not determine the zed package version.'
+          }
+          "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+          "ZED_RELEASE_CHANNEL=stable" >> $env:GITHUB_ENV
+
+      - name: Verify native Windows prerequisites
+        shell: pwsh
+        run: script/check-native-prerequisites.ps1 -ForBundle
+
+      - name: Build the Windows installer
+        shell: pwsh
+        run: script/bundle-windows.ps1
+
+      - name: Upload the Windows installer and executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: KnightCode-windows-x86_64
+          path: |
+            target/KnightCode-x86_64.exe
+            inno/x86_64/KnightCode.exe
+          if-no-files-found: error
+          retention-days: 14

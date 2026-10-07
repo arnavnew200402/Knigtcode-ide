@@ -1,0 +1,96 @@
+KnightCode
+Copyright 2026 KnightCodeAI
+
+This product includes software developed by third parties. What follows is the
+notice GPL-3.0 §5 and the Apache-2.0 §4(d) ask a distributor to carry. It is not
+a licence: the licences themselves are in LICENSE-GPL and LICENSE-APACHE beside
+this file, and per-component texts are named below.
+
+--------------------------------------------------------------------------------
+Zed
+--------------------------------------------------------------------------------
+
+KnightCode is a modified version of the Zed editor.
+
+  Copyright 2022 - 2025 Zed Industries, Inc.
+  https://github.com/zed-industries/zed
+
+Zed's editor, workspace, terminal, language and platform crates are licensed
+GPL-3.0-or-later; see LICENSE-GPL. KnightCode is a modified version of that
+work, distributed under the same licence, and its source is at
+https://github.com/KnightCodeAI/knightcode-ide.
+
+KnightCode is not affiliated with, endorsed by, or sponsored by Zed Industries,
+Inc. "Zed" is their name, used here only to say truthfully what this is built
+on.
+
+Extensions are downloaded from the Zed extension registry at api.zed.dev. That
+is the only third-party service a KnightCode install contacts, and only once you
+open the Extensions page.
+
+--------------------------------------------------------------------------------
+gpui and the Apache-2.0 components
+--------------------------------------------------------------------------------
+
+  Copyright 2022 - 2025 Zed Industries, Inc.
+
+gpui, and the other crates in the upstream tree that carry an Apache-2.0
+header, are licensed under the Apache License, Version 2.0; see LICENSE-APACHE.
+You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Files in this distribution that are modified from their Apache-2.0 originals
+carry that fact in their own headers or in the repository's history.
+
+--------------------------------------------------------------------------------
+Bundled themes and icon themes
+--------------------------------------------------------------------------------
+
+The themes shipped in assets/themes/ are each the work of their own authors,
+under their own licences. Every one of them, with its copyright line and full
+licence text, is listed in:
+
+  assets/themes/LICENSES
+
+--------------------------------------------------------------------------------
+knightcode-engine
+--------------------------------------------------------------------------------
+
+The engine binary shipped in engine/ beside the KnightCode executable is the
+KnightCode CLI's engine.
+
+  Copyright 2026 KnightCodeAI
+  MIT License
+  https://github.com/KnightCodeAI/knightcode
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+It runs as a separate process, reached over loopback HTTP and stdio. Its own
+third-party dependencies and their licences are listed in that repository.
+
+--------------------------------------------------------------------------------
+Rust crates
+--------------------------------------------------------------------------------
+
+The dependency tree's licences are reproduced in
+
+  assets/licenses.md
+
+which the build generates and Help > View Dependency Licenses opens.
