@@ -417,7 +417,13 @@ impl WorkspaceModes {
         }
         let pane = workspace.active_pane().clone();
         self.page_pane = Some(pane.downgrade());
-        pane.update(cx, |pane, cx| pane.zoom_in(&ZoomIn, window, cx));
+        pane.update(cx, |pane, cx| {
+            // KnightCode's front pages should not look like a Zed editor tab.
+            // Build mode restores the standard tab bar in restore().
+            pane.set_should_display_tab_bar(|_, _| false);
+            cx.notify();
+            pane.zoom_in(&ZoomIn, window, cx);
+        });
         set_title_bar_mode(workspace, page.mode(), cx);
         item.update(cx, |item, cx| {
             if page == Page::Home {
@@ -447,7 +453,11 @@ impl WorkspaceModes {
             });
         }
         if let Some(pane) = self.page_pane.take().and_then(|pane| pane.upgrade()) {
-            pane.update(cx, |pane, cx| pane.zoom_out(&ZoomOut, window, cx));
+            pane.update(cx, |pane, cx| {
+                pane.set_should_display_tab_bar(|_, _| true);
+                cx.notify();
+                pane.zoom_out(&ZoomOut, window, cx);
+            });
         }
         if self.pane_was_zoomed {
             if let Some(pane) = self.build_pane.take().and_then(|pane| pane.upgrade()) {
