@@ -95,7 +95,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
-          cache-target: true
+          cache-targets: true
           cache-on-failure: true
 
       - name: Install Windows packaging prerequisites
