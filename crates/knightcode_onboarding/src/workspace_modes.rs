@@ -484,6 +484,9 @@ impl WorkspaceModes {
 
     fn build_ready(&mut self, workspace: &mut Workspace, window: &mut Window, cx: &mut App) {
         set_title_bar_mode(workspace, KnightCodeMode::Build, cx);
+        // Build mode is the editor plus the right-side KnightCode agent dock,
+        // matching the normal Zed workspace layout shown in the reference.
+        workspace.reveal_panel::<AgentPanel>(window, cx);
         let item = self
             .build_item
             .as_ref()

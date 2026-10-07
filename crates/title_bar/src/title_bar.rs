@@ -679,43 +679,20 @@ impl TitleBar {
     fn render_mode_controls(&self, _cx: &mut Context<Self>) -> impl IntoElement {
         let mode = self.knightcode_mode;
         let operation = self.knightcode_operation.clone();
-        let mode_entries = if mode == KnightCodeMode::Chat {
-            vec![
-                (
-                    "knightcode-chat",
-                    "Chat",
-                    KnightCodeMode::Chat,
-                    ShowChat.boxed_clone(),
-                ),
-                (
-                    "knightcode-build",
-                    "Build",
-                    KnightCodeMode::Build,
-                    ShowBuild.boxed_clone(),
-                ),
-            ]
-        } else {
-            vec![
-                (
-                    "knightcode-home",
-                    "Home",
-                    KnightCodeMode::Home,
-                    ShowHome.boxed_clone(),
-                ),
-                (
-                    "knightcode-chat",
-                    "Chat",
-                    KnightCodeMode::Chat,
-                    ShowChat.boxed_clone(),
-                ),
-                (
-                    "knightcode-build",
-                    "Build",
-                    KnightCodeMode::Build,
-                    ShowBuild.boxed_clone(),
-                ),
-            ]
-        };
+        let mode_entries = vec![
+            (
+                "knightcode-chat",
+                "Chat",
+                KnightCodeMode::Chat,
+                ShowChat.boxed_clone(),
+            ),
+            (
+                "knightcode-build",
+                "Build",
+                KnightCodeMode::Build,
+                ShowBuild.boxed_clone(),
+            ),
+        ];
         let mut controls = h_flex()
             .gap_0p5()
             .px_1()
