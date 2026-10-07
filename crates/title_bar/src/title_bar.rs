@@ -345,8 +345,9 @@ impl Render for TitleBar {
                     )
                 })
                 .map(|title_bar| {
-                    let mut render_project_items = title_bar_settings.show_branch_name
-                        || title_bar_settings.show_project_items;
+                    let mut render_project_items = self.knightcode_mode == KnightCodeMode::Build
+                        && (title_bar_settings.show_branch_name
+                            || title_bar_settings.show_project_items);
                     title_bar
                         .when_some(
                             self.application_menu.clone().filter(|_| !show_menus),
@@ -387,7 +388,11 @@ impl Render for TitleBar {
 
         children.push(self.render_collaborator_list(window, cx).into_any_element());
 
-        children.push(self.render_mode_controls(cx).into_any_element());
+        if self.knightcode_mode == KnightCodeMode::Home {
+            children.push(self.render_global_search().into_any_element());
+        } else {
+            children.push(self.render_mode_controls(cx).into_any_element());
+        }
 
         if title_bar_settings.show_onboarding_banner {
             if let Some(banner) = &self.banner {
@@ -638,6 +643,37 @@ impl TitleBar {
         self.knightcode_operation = operation;
         self.knightcode_operation_busy = busy;
         cx.notify();
+    }
+
+    fn render_global_search(&self) -> impl IntoElement {
+        ButtonLike::new("knightcode-global-search")
+            .w(px(440.))
+            .h(px(34.))
+            .px_3()
+            .rounded_lg()
+            .border_1()
+            .border_color(rgba(0x7e76bb35))
+            .bg(rgba(0x161838cc))
+            .on_click(|_, window, cx| {
+                window.dispatch_action(zed_actions::command_palette::Toggle.boxed_clone(), cx)
+            })
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .child(Icon::new(IconName::MagnifyingGlass).color(Color::Muted))
+                    .child(
+                        Label::new("Search projects, files, or anything…")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        Label::new("Ctrl + K")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    ),
+            )
     }
 
     fn render_mode_controls(&self, _cx: &mut Context<Self>) -> impl IntoElement {

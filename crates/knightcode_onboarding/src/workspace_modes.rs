@@ -20,7 +20,7 @@ use language_model::AuthenticateError;
 use remote::RemoteConnectionOptions;
 use settings::{DefaultOpenBehavior, Settings as _};
 use title_bar::{KnightCodeMode, ShowAccount, ShowBuild, ShowChat, ShowHome, ShowModels, TitleBar};
-use ui::{ButtonLike, Divider, KeyBinding, TintColor, prelude::*, utils::WithRemSize};
+use ui::{ButtonLike, Divider, TintColor, prelude::*, utils::WithRemSize};
 use util::ResultExt as _;
 use workspace::{
     AppState, OpenMode, OpenOptions, Pane, RecentWorkspace, SerializedWorkspaceLocation, Workspace,
@@ -1173,13 +1173,6 @@ impl KnightCodePage {
                                 Some(Page::Models),
                                 ShowModels.boxed_clone(),
                             ),
-                            (
-                                "account",
-                                "Account",
-                                IconName::Person,
-                                Some(Page::Account),
-                                ShowAccount.boxed_clone(),
-                            ),
                         ]
                         .into_iter()
                         .map(|(id, label, icon, target, action)| {
@@ -1414,11 +1407,6 @@ impl KnightCodePage {
             );
         }
         v_flex().id("home-content").size_full().p_8().gap_6().overflow_y_scroll()
-            .child(Button::new("home-search", "Search commands…")
-                .full_width().style(ButtonStyle::Outlined)
-                .start_icon(Icon::new(IconName::MagnifyingGlass))
-                .key_binding(KeyBinding::for_action(&zed_actions::command_palette::Toggle, cx))
-                .on_click(|_, window, cx| window.dispatch_action(zed_actions::command_palette::Toggle.boxed_clone(), cx)))
             .child(h_flex().w_full().gap_6().justify_between()
                 .child(v_flex().flex_1().gap_3().justify_center()
                     .child(Label::new("THINK › BUILD › BEYOND").size(LabelSize::Small).color(Color::Custom(rgb(0x9aa0d6).into())))
@@ -1426,22 +1414,22 @@ impl KnightCodePage {
                     .child(div().text_size(px(44.)).font_weight(gpui::FontWeight::BOLD).text_color(rgb(0xb19bff)).child("into real impact."))
                     .child(Label::new("Chat with AI, or open a project and start building.").color(Color::Custom(rgb(0xb7bad8).into())))
                     .child(Label::new("Same intelligence. More possibilities.").color(Color::Custom(rgb(0xb7bad8).into()))))
-                .child(img(self.logo.clone()).size(px(200.)).flex_none()))
+                .child(img(self.logo.clone()).size(px(300.)).flex_none()))
             .child(h_flex().w_full().flex_wrap().gap_4()
                 .child(v_flex().flex_1().min_w(px(240.)).p_5().gap_3().rounded_xl().border_1().border_color(rgba(0x826eff33)).bg(rgba(0x100c2ac7))
                     .child(Icon::new(IconName::Chat).color(Color::Custom(rgb(0xb19bff).into())))
                     .child(Headline::new("Chat"))
-                    .child(Label::new("Ask, explore, brainstorm and continue your conversations.").color(Color::Muted))
-                    .child(Button::new("start-chat", "Start Chatting →").full_width().style(ButtonStyle::Outlined)
+                    .child(Label::new("Ask, explore, brainstorm and get instant answers.").color(Color::Muted))
+                    .child(Button::new("start-chat", "Start Chatting →").full_width().style(ButtonStyle::Tinted(TintColor::Accent))
                         .on_click(|_, window, cx| window.dispatch_action(ShowChat.boxed_clone(), cx))))
                 .child(v_flex().flex_1().min_w(px(240.)).p_5().gap_3().rounded_xl().border_1().border_color(rgba(0x826eff33)).bg(rgba(0x100c2ac7))
                     .child(Icon::new(IconName::Code).color(Color::Custom(rgb(0xd9956c).into())))
                     .child(Headline::new("Build"))
                     .child(Label::new("Open a project, write code, run commands and build with AI.").color(Color::Muted))
-                    .child(Button::new("open-project", "Open Project →").full_width().style(ButtonStyle::Outlined)
+                    .child(Button::new("open-project", "Open Project →").full_width().style(ButtonStyle::Tinted(TintColor::Accent))
                         .on_click(|_, window, cx| window.dispatch_action(workspace::Open::default().boxed_clone(), cx)))))
             .child(h_flex().justify_between()
-                .child(h_flex().gap_2().child(Icon::new(IconName::Clock)).child(Label::new("Recent Projects")))
+                .child(h_flex().gap_2().child(Icon::new(IconName::Clock)).child(Label::new("Recent")))
                 .child(Button::new("all-projects", "View all →").on_click(|_, window, cx| {
                     window.dispatch_action(zed_actions::OpenRecent::default().boxed_clone(), cx);
                 })))
