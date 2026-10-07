@@ -29,7 +29,6 @@ use gpui::{
 use gpui_platform;
 
 use gpui_tokio::Tokio;
-use knightcode_onboarding::FIRST_OPEN;
 use language::LanguageRegistry;
 use project_panel::ProjectPanel;
 use prompt_store::PromptBuilder;
@@ -83,10 +82,7 @@ use theme_settings::load_user_theme;
 use util::{ResultExt, maybe};
 use uuid::Uuid;
 use workspace::{
-    AppState, MultiWorkspace, SerializedWorkspaceLocation, SessionWorkspace, Toast,
-    WorkspaceSettings, WorkspaceStore,
-    notifications::{NotificationId, NotifyResultExt},
-    restore_multiworkspace,
+    AppState, MultiWorkspace, SessionWorkspace, WorkspaceSettings, WorkspaceStore,
 };
 use zed::{
     OpenListener, OpenRequest, RawOpenRequest, app_menus, build_window_options,
@@ -1458,112 +1454,13 @@ pub(crate) async fn restore_or_create_workspace(
     app_state: Arc<AppState>,
     cx: &mut AsyncApp,
 ) -> Result<()> {
-    let kvp = cx.update(|cx| KeyValueStore::global(cx));
-    if let Some(multi_workspaces) = restorable_workspaces(cx, &app_state).await {
-        let mut error_count = 0;
-        for multi_workspace in multi_workspaces {
-            let result = match &multi_workspace.active_workspace.location {
-                SerializedWorkspaceLocation::Local => {
-                    restore_multiworkspace(multi_workspace, app_state.clone(), cx)
-                        .await
-                        .map(|_| ())
-                }
-                SerializedWorkspaceLocation::Remote(connection_options) => {
-                    let mut connection_options = connection_options.clone();
-                    if let RemoteConnectionOptions::Ssh(options) = &mut connection_options {
-                        cx.update(|cx| {
-                            RemoteSettings::get_global(cx)
-                                .fill_connection_options_from_settings(options)
-                        });
-                    }
-
-                    let paths = multi_workspace
-                        .active_workspace
-                        .paths
-                        .paths()
-                        .iter()
-                        .map(PathBuf::from)
-                        .collect::<Vec<_>>();
-                    let state = multi_workspace.state.clone();
-                    async {
-                        let window = open_remote_project(
-                            connection_options,
-                            paths,
-                            app_state.clone(),
-                            workspace::OpenOptions::default(),
-                            cx,
-                        )
-                        .await?;
-                        workspace::apply_restored_multiworkspace_state(
-                            window,
-                            &state,
-                            app_state.fs.clone(),
-                            cx,
-                        )
-                        .await;
-                        Ok::<(), anyhow::Error>(())
-                    }
-                    .await
-                }
-            };
-
-            if let Err(error) = result {
-                log::error!("Failed to restore workspace: {error:#}");
-                error_count += 1;
-            }
-        }
-
-        if error_count > 0 {
-            let message = if error_count == 1 {
-                "Failed to restore 1 workspace. Check logs for details.".to_string()
-            } else {
-                format!(
-                    "Failed to restore {} workspaces. Check logs for details.",
-                    error_count
-                )
-            };
-
-            // Try to find an active workspace to show the toast
-            let toast_shown = cx.update(|cx| {
-                if let Some(window) = cx.active_window()
-                    && let Some(multi_workspace) = window.downcast::<MultiWorkspace>()
-                {
-                    multi_workspace
-                        .update(cx, |multi_workspace, _, cx| {
-                            multi_workspace.workspace().update(cx, |workspace, cx| {
-                                workspace.show_toast(
-                                    Toast::new(NotificationId::unique::<()>(), message.clone()),
-                                    cx,
-                                )
-                            });
-                        })
-                        .ok();
-                    return true;
-                }
-                false
-            });
-
-            if !toast_shown {
-                log::error!(
-                    "All workspace restorations failed; the startup Home window will be opened below."
-                );
-            }
-        }
-
-        // Always put a fresh Home workspace in front after restoring projects.
-        // Restored workspace state may contain a previous Home item inside a
-        // project workspace, which makes startup look like the project opened
-        // first and also leaves the Home page behind another window.
-        cx.update(|cx| knightcode_onboarding::show_home(app_state.clone(), cx))
-            .await?;
-    } else if matches!(kvp.read_kvp(FIRST_OPEN), Ok(None)) {
-        cx.update(|cx| knightcode_onboarding::show_first_run(app_state, cx))
-            .await?;
-    } else {
-        cx.update(|cx| knightcode_onboarding::show_home(app_state, cx))
-            .await?;
-    }
-
+    // KnightCode owns the startup surface. Restoring the previous Zed session
+    // here opens one or more project windows and then opening Home creates an
+    // additional application window. Projects remain available from Home's
+    // Recent section and Build mode can open them on demand.
+    let _ = restorable_workspaces(cx, &app_state).await;
+    cx.update(|cx| knightcode_onboarding::show_home(app_state, cx))
+        .await?;
     Ok(())
 }
 
