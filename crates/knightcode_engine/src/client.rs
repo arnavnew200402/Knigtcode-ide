@@ -33,12 +33,18 @@ pub enum LoginKind {
     Oauth,
 }
 
+impl Default for LoginKind {
+    fn default() -> Self {
+        Self::ApiKey
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
     pub provider_id: String,
     pub provider_name: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default)]
     pub kind: LoginKind,
     pub is_subscription: bool,
 }
@@ -48,7 +54,7 @@ pub struct Account {
 pub struct LoginOption {
     pub provider_id: String,
     pub provider_name: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default)]
     pub kind: LoginKind,
     pub label: String,
     pub is_subscription: bool,
