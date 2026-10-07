@@ -1134,77 +1134,80 @@ impl KnightCodePage {
             .border_r_1()
             .border_color(rgba(0xb4a0ff24))
             .bg(rgba(0x08061cd9))
-            .children(
-                [
-                    (
-                        "home",
-                        "Home",
-                        IconName::Screen,
-                        Some(Page::Home),
-                        ShowHome.boxed_clone(),
-                    ),
-                    (
-                        "chat",
-                        "Chat",
-                        IconName::Chat,
-                        Some(Page::Chat),
-                        ShowChat.boxed_clone(),
-                    ),
-                    (
-                        "build",
-                        "Build",
-                        IconName::Code,
-                        None,
-                        ShowBuild.boxed_clone(),
-                    ),
-                    (
-                        "projects",
-                        "Projects",
-                        IconName::Folder,
-                        None,
-                        zed_actions::OpenRecent::default().boxed_clone(),
-                    ),
-                    (
-                        "models",
-                        "Models",
-                        IconName::Box,
-                        Some(Page::Models),
-                        ShowModels.boxed_clone(),
-                    ),
-                    (
-                        "account",
-                        "Account",
-                        IconName::Person,
-                        Some(Page::Account),
-                        ShowAccount.boxed_clone(),
-                    ),
-                ]
-                .into_iter()
-                .map(|(id, label, icon, target, action)| {
-                    Button::new(id, label)
-                        .full_width()
-                        .start_icon(Icon::new(icon).color(Color::Custom(rgb(0xc4c8ea).into())))
-                        .toggle_state(Some(page) == target)
-                        .selected_label_color(Color::Custom(rgb(0xb19bff).into()))
-                        .selected_style(ButtonStyle::Tinted(TintColor::Accent))
-                        .on_click(move |_, window, cx| {
-                            window.dispatch_action(action.boxed_clone(), cx)
-                        })
-                }),
-            )
-            .child(
-                Button::new("settings", "Settings")
-                    .full_width()
-                    .start_icon(Icon::new(IconName::Settings))
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(zed_actions::OpenSettings.boxed_clone(), cx)
-                    }),
-            )
+            .when(page != Page::Chat, |navigation| {
+                navigation
+                    .children(
+                        [
+                            (
+                                "home",
+                                "Home",
+                                IconName::Screen,
+                                Some(Page::Home),
+                                ShowHome.boxed_clone(),
+                            ),
+                            (
+                                "chat",
+                                "Chat",
+                                IconName::Chat,
+                                Some(Page::Chat),
+                                ShowChat.boxed_clone(),
+                            ),
+                            (
+                                "build",
+                                "Build",
+                                IconName::Code,
+                                None,
+                                ShowBuild.boxed_clone(),
+                            ),
+                            (
+                                "projects",
+                                "Projects",
+                                IconName::Folder,
+                                None,
+                                zed_actions::OpenRecent::default().boxed_clone(),
+                            ),
+                            (
+                                "models",
+                                "Models",
+                                IconName::Box,
+                                Some(Page::Models),
+                                ShowModels.boxed_clone(),
+                            ),
+                            (
+                                "account",
+                                "Account",
+                                IconName::Person,
+                                Some(Page::Account),
+                                ShowAccount.boxed_clone(),
+                            ),
+                        ]
+                        .into_iter()
+                        .map(|(id, label, icon, target, action)| {
+                            Button::new(id, label)
+                                .full_width()
+                                .start_icon(
+                                    Icon::new(icon).color(Color::Custom(rgb(0xc4c8ea).into())),
+                                )
+                                .toggle_state(Some(page) == target)
+                                .selected_label_color(Color::Custom(rgb(0xb19bff).into()))
+                                .selected_style(ButtonStyle::Tinted(TintColor::Accent))
+                                .on_click(move |_, window, cx| {
+                                    window.dispatch_action(action.boxed_clone(), cx)
+                                })
+                        }),
+                    )
+                    .child(
+                        Button::new("settings", "Settings")
+                            .full_width()
+                            .start_icon(Icon::new(IconName::Settings))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(zed_actions::OpenSettings.boxed_clone(), cx)
+                            }),
+                    )
+                    .child(div().flex_1())
+            })
             .when(page == Page::Chat, |navigation| {
                 navigation.child(self.render_history(cx))
-            })
-            .when(page != Page::Chat, |navigation| {
-                navigation.child(div().flex_1())
             })
             .child(
                 v_flex()

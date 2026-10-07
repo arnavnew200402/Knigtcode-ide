@@ -337,6 +337,13 @@ impl Render for TitleBar {
             h_flex()
                 .h_full()
                 .gap_0p5()
+                .when(self.knightcode_mode != KnightCodeMode::Build, |title_bar| {
+                    title_bar.child(
+                        Label::new("KnightCode")
+                            .size(LabelSize::Small)
+                            .text_color(gpui::rgb(0xb19bff)),
+                    )
+                })
                 .map(|title_bar| {
                     let mut render_project_items = title_bar_settings.show_branch_name
                         || title_bar_settings.show_project_items;
@@ -412,43 +419,48 @@ impl Render for TitleBar {
                 .child(self.render_call_controls(window, cx))
                 .children(self.render_connection_status(status, cx))
                 .child(self.update_version.clone())
-                .child(
-                    IconButton::new("knightcode-search", IconName::MagnifyingGlass)
-                        .tooltip(Tooltip::for_action_title(
-                            "Search Commands",
-                            &zed_actions::command_palette::Toggle,
-                        ))
-                        .on_click(|_, window, cx| {
-                            window.dispatch_action(
-                                zed_actions::command_palette::Toggle.boxed_clone(),
-                                cx,
-                            );
-                        }),
-                )
-                .child(
-                    Button::new("knightcode-models", "Models")
-                        .label_size(LabelSize::Small)
-                        .on_click(|_, window, cx| {
-                            window.dispatch_action(ShowModels.boxed_clone(), cx)
-                        }),
-                )
-                .child(
-                    Button::new("knightcode-account", "Account")
-                        .label_size(LabelSize::Small)
-                        .on_click(|_, window, cx| {
-                            window.dispatch_action(ShowAccount.boxed_clone(), cx)
-                        }),
-                )
-                .child(
-                    IconButton::new("knightcode-settings", IconName::Settings)
-                        .tooltip(Tooltip::for_action_title(
-                            "Settings",
-                            &zed_actions::OpenSettings,
-                        ))
-                        .on_click(|_, window, cx| {
-                            window.dispatch_action(zed_actions::OpenSettings.boxed_clone(), cx)
-                        }),
-                )
+                .when(self.knightcode_mode == KnightCodeMode::Build, |this| {
+                    this.child(
+                        IconButton::new("knightcode-search", IconName::MagnifyingGlass)
+                            .tooltip(Tooltip::for_action_title(
+                                "Search Commands",
+                                &zed_actions::command_palette::Toggle,
+                            ))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(
+                                    zed_actions::command_palette::Toggle.boxed_clone(),
+                                    cx,
+                                );
+                            }),
+                    )
+                    .child(
+                        Button::new("knightcode-models", "Models")
+                            .label_size(LabelSize::Small)
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(ShowModels.boxed_clone(), cx)
+                            }),
+                    )
+                    .child(
+                        Button::new("knightcode-account", "Account")
+                            .label_size(LabelSize::Small)
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(ShowAccount.boxed_clone(), cx)
+                            }),
+                    )
+                    .child(
+                        IconButton::new("knightcode-settings", IconName::Settings)
+                            .tooltip(Tooltip::for_action_title(
+                                "Settings",
+                                &zed_actions::OpenSettings,
+                            ))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(
+                                    zed_actions::OpenSettings.boxed_clone(),
+                                    cx,
+                                )
+                            }),
+                    )
+                })
                 .when(
                     user.is_none()
                         && is_signed_out_or_auth_error
@@ -631,51 +643,65 @@ impl TitleBar {
     fn render_mode_controls(&self, _cx: &mut Context<Self>) -> impl IntoElement {
         let mode = self.knightcode_mode;
         let operation = self.knightcode_operation.clone();
+        let mode_entries = if mode == KnightCodeMode::Chat {
+            vec![
+                (
+                    "knightcode-chat",
+                    "Chat",
+                    KnightCodeMode::Chat,
+                    ShowChat.boxed_clone(),
+                ),
+                (
+                    "knightcode-build",
+                    "Build",
+                    KnightCodeMode::Build,
+                    ShowBuild.boxed_clone(),
+                ),
+            ]
+        } else {
+            vec![
+                (
+                    "knightcode-home",
+                    "Home",
+                    KnightCodeMode::Home,
+                    ShowHome.boxed_clone(),
+                ),
+                (
+                    "knightcode-chat",
+                    "Chat",
+                    KnightCodeMode::Chat,
+                    ShowChat.boxed_clone(),
+                ),
+                (
+                    "knightcode-build",
+                    "Build",
+                    KnightCodeMode::Build,
+                    ShowBuild.boxed_clone(),
+                ),
+            ]
+        };
         let mut controls = h_flex()
             .gap_0p5()
             .px_1()
             .rounded_full()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .children(
-                [
-                    (
-                        "knightcode-home",
-                        "Home",
-                        KnightCodeMode::Home,
-                        ShowHome.boxed_clone(),
-                    ),
-                    (
-                        "knightcode-chat",
-                        "Chat",
-                        KnightCodeMode::Chat,
-                        ShowChat.boxed_clone(),
-                    ),
-                    (
-                        "knightcode-build",
-                        "Build",
-                        KnightCodeMode::Build,
-                        ShowBuild.boxed_clone(),
-                    ),
-                ]
-                .into_iter()
-                .map(|(id, label, entry_mode, action)| {
-                    Button::new(id, label)
-                        .label_size(LabelSize::Small)
-                        .toggle_state(mode == entry_mode)
-                        .disabled(self.knightcode_operation_busy)
-                        .selected_label_color(Color::Custom(
-                            if entry_mode == KnightCodeMode::Build {
-                                gpui::rgb(0xe6a47a).into()
-                            } else {
-                                gpui::rgb(0xb19bff).into()
-                            },
-                        ))
-                        .selected_style(ButtonStyle::Tinted(TintColor::Accent))
-                        .on_click(move |_, window, cx| {
-                            window.dispatch_action(action.boxed_clone(), cx)
-                        })
-                }),
-            );
+            .children(mode_entries.into_iter().map(|(id, label, entry_mode, action)| {
+                Button::new(id, label)
+                    .label_size(LabelSize::Small)
+                    .toggle_state(mode == entry_mode)
+                    .disabled(self.knightcode_operation_busy)
+                    .selected_label_color(Color::Custom(
+                        if entry_mode == KnightCodeMode::Build {
+                            gpui::rgb(0xe6a47a).into()
+                        } else {
+                            gpui::rgb(0xb19bff).into()
+                        },
+                    ))
+                    .selected_style(ButtonStyle::Tinted(TintColor::Accent))
+                    .on_click(move |_, window, cx| {
+                        window.dispatch_action(action.boxed_clone(), cx)
+                    })
+            }));
         if let Some(operation) = operation {
             controls = controls.child(Label::new(operation).size(LabelSize::Small).color(
                 if self.knightcode_operation_busy {
