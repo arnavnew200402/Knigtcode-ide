@@ -341,7 +341,7 @@ impl Render for TitleBar {
                     title_bar.child(
                         Label::new("KnightCode")
                             .size(LabelSize::Small)
-                            .color(gpui::rgb(0xb19bff)),
+                            .color(Color::Custom(gpui::rgb(0xb19bff).into())),
                     )
                 })
                 .map(|title_bar| {
@@ -459,10 +459,7 @@ impl Render for TitleBar {
                                 &zed_actions::OpenSettings,
                             ))
                             .on_click(|_, window, cx| {
-                                window.dispatch_action(
-                                    zed_actions::OpenSettings.boxed_clone(),
-                                    cx,
-                                )
+                                window.dispatch_action(zed_actions::OpenSettings.boxed_clone(), cx)
                             }),
                     )
                 })
@@ -646,32 +643,42 @@ impl TitleBar {
     }
 
     fn render_global_search(&self) -> impl IntoElement {
-        ButtonLike::new("knightcode-global-search")
-            .width(px(440.))
-            .height(px(34.))
-            .px_3()
+        // ButtonLike exposes button-specific sizing, not GPUI's Styled API.
+        // Keep the custom search-field decoration on a styled container.
+        div()
+            .w(px(440.))
+            .flex_none()
             .rounded_lg()
+            .overflow_hidden()
             .border_1()
             .border_color(rgba(0x7e76bb35))
             .bg(rgba(0x161838cc))
-            .on_click(|_, window, cx| {
-                window.dispatch_action(zed_actions::command_palette::Toggle.boxed_clone(), cx)
-            })
             .child(
-                h_flex()
-                    .w_full()
-                    .gap_2()
-                    .child(Icon::new(IconName::MagnifyingGlass).color(Color::Muted))
+                ButtonLike::new("knightcode-global-search")
+                    .full_width()
+                    .height(px(34.).into())
+                    .style(ButtonStyle::Transparent)
+                    .on_click(|_, window, cx| {
+                        window
+                            .dispatch_action(zed_actions::command_palette::Toggle.boxed_clone(), cx)
+                    })
                     .child(
-                        Label::new("Search projects, files, or anything…")
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        Label::new("Ctrl + K")
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
+                        h_flex()
+                            .w_full()
+                            .px_3()
+                            .gap_2()
+                            .child(Icon::new(IconName::MagnifyingGlass).color(Color::Muted))
+                            .child(
+                                Label::new("Search projects, files, or anything…")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                Label::new("Ctrl + K")
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            ),
                     ),
             )
     }
@@ -698,23 +705,27 @@ impl TitleBar {
             .px_1()
             .rounded_full()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .children(mode_entries.into_iter().map(|(id, label, entry_mode, action)| {
-                Button::new(id, label)
-                    .label_size(LabelSize::Small)
-                    .toggle_state(mode == entry_mode)
-                    .disabled(self.knightcode_operation_busy)
-                    .selected_label_color(Color::Custom(
-                        if entry_mode == KnightCodeMode::Build {
-                            gpui::rgb(0xe6a47a).into()
-                        } else {
-                            gpui::rgb(0xb19bff).into()
-                        },
-                    ))
-                    .selected_style(ButtonStyle::Tinted(TintColor::Accent))
-                    .on_click(move |_, window, cx| {
-                        window.dispatch_action(action.boxed_clone(), cx)
-                    })
-            }));
+            .children(
+                mode_entries
+                    .into_iter()
+                    .map(|(id, label, entry_mode, action)| {
+                        Button::new(id, label)
+                            .label_size(LabelSize::Small)
+                            .toggle_state(mode == entry_mode)
+                            .disabled(self.knightcode_operation_busy)
+                            .selected_label_color(Color::Custom(
+                                if entry_mode == KnightCodeMode::Build {
+                                    gpui::rgb(0xe6a47a).into()
+                                } else {
+                                    gpui::rgb(0xb19bff).into()
+                                },
+                            ))
+                            .selected_style(ButtonStyle::Tinted(TintColor::Accent))
+                            .on_click(move |_, window, cx| {
+                                window.dispatch_action(action.boxed_clone(), cx)
+                            })
+                    }),
+            );
         if let Some(operation) = operation {
             controls = controls.child(Label::new(operation).size(LabelSize::Small).color(
                 if self.knightcode_operation_busy {
@@ -737,10 +748,7 @@ impl TitleBar {
                     Button::new("knightcode-run", "Run")
                         .label_size(LabelSize::Small)
                         .on_click(|_, window, cx| {
-                            window.dispatch_action(
-                                zed_actions::Spawn::modal().boxed_clone(),
-                                cx,
-                            )
+                            window.dispatch_action(zed_actions::Spawn::modal().boxed_clone(), cx)
                         }),
                 )
                 .child(
