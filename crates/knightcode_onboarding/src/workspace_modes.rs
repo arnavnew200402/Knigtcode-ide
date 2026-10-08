@@ -23,13 +23,11 @@ use title_bar::{KnightCodeMode, ShowAccount, ShowBuild, ShowChat, ShowHome, Show
 use ui::{ButtonLike, Divider, TintColor, prelude::*, utils::WithRemSize};
 use util::ResultExt as _;
 use workspace::{
-    AppState, OpenMode, OpenOptions, Pane, RecentWorkspace, SerializedWorkspaceLocation, Workspace,
-    WorkspaceDb, WorkspaceSettings, ZoomIn, ZoomOut,
+    AppState, DockStructure, OpenMode, OpenOptions, Pane, RecentWorkspace,
+    SerializedWorkspaceLocation, Workspace, WorkspaceDb, WorkspaceSettings, ZoomIn, ZoomOut,
     item::{Item, ItemEvent, WeakItemHandle},
     notifications::DetachAndPromptErr as _,
-    open_new,
-    DockStructure,
-    with_active_or_new_workspace,
+    open_new, with_active_or_new_workspace,
 };
 
 #[derive(Default)]
@@ -144,19 +142,23 @@ fn install(
     {
         return modes;
     }
-        let workspace_handle = workspace.weak_handle();
-        let modes = cx.new(|cx| {
-            let subscription = workspace_handle.upgrade().map(|workspace| {
-            cx.subscribe_in(&workspace, window, |_this: &mut WorkspaceModes, workspace, event, window, cx| {
-                if matches!(event, workspace::Event::ActiveItemChanged) {
-                    let workspace = workspace.downgrade();
-                    cx.defer_in(window, move |this, window, cx| {
-                        workspace
-                            .update(cx, |workspace, cx| this.reconcile(workspace, window, cx))
-                            .log_err();
-                    });
-                }
-            })
+    let workspace_handle = workspace.weak_handle();
+    let modes = cx.new(|cx| {
+        let subscription = workspace_handle.upgrade().map(|workspace| {
+            cx.subscribe_in(
+                &workspace,
+                window,
+                |_this: &mut WorkspaceModes, workspace, event, window, cx| {
+                    if matches!(event, workspace::Event::ActiveItemChanged) {
+                        let workspace = workspace.downgrade();
+                        cx.defer_in(window, move |this, window, cx| {
+                            workspace
+                                .update(cx, |workspace, cx| this.reconcile(workspace, window, cx))
+                                .log_err();
+                        });
+                    }
+                },
+            )
         });
         WorkspaceModes {
             workspace: workspace_handle.clone(),
@@ -436,12 +438,7 @@ impl WorkspaceModes {
         window.focus(&item.focus_handle(cx), cx);
     }
 
-    fn restore(
-        &mut self,
-        workspace: &mut Workspace,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
+    fn restore(&mut self, workspace: &mut Workspace, window: &mut Window, cx: &mut App) {
         if let Some(docks) = self.build_docks.take() {
             let workspace_handle = self.workspace.clone();
             window.defer(cx, move |window, cx| {
@@ -484,9 +481,21 @@ impl WorkspaceModes {
 
     fn build_ready(&mut self, workspace: &mut Workspace, window: &mut Window, cx: &mut App) {
         set_title_bar_mode(workspace, KnightCodeMode::Build, cx);
-        // Build mode is the editor plus the right-side KnightCode agent dock,
-        // matching the normal Zed workspace layout shown in the reference.
-        workspace.reveal_panel::<AgentPanel>(window, cx);
+        // Reveal the agent after the queued dock restoration, and update the
+        // workspace entity to obtain Context<Workspace> (not Context<Self>).
+        // Doing this immediately would both use the wrong context and let the
+        // restored dock state hide the agent panel again.
+        let workspace_handle = self.workspace.clone();
+        window.defer(cx, move |window, cx| {
+            workspace_handle
+                .update(cx, |workspace, cx| {
+                    // A quick switch back to a front page must not reopen docks.
+                    if workspace.active_item_as::<KnightCodePage>(cx).is_none() {
+                        workspace.reveal_panel::<AgentPanel>(window, cx);
+                    }
+                })
+                .log_err();
+        });
         let item = self
             .build_item
             .as_ref()
@@ -981,12 +990,13 @@ impl KnightCodePage {
                         )
                     })?
                     .await?;
-                let (target_project, work_dirs, worktree_paths) = target_workspace.read_with(cx, |workspace, cx| {
-                    let target_project = workspace.project().clone();
-                    let work_dirs = target_project.read(cx).default_path_list(cx);
-                    let worktree_paths = target_project.read(cx).worktree_paths(cx);
-                    (target_project, work_dirs, worktree_paths)
-                });
+                let (target_project, work_dirs, worktree_paths) =
+                    target_workspace.read_with(cx, |workspace, cx| {
+                        let target_project = workspace.project().clone();
+                        let work_dirs = target_project.read(cx).default_path_list(cx);
+                        let worktree_paths = target_project.read(cx).worktree_paths(cx);
+                        (target_project, work_dirs, worktree_paths)
+                    });
                 let target_panel =
                     target_workspace.update_in(cx, |workspace, _window, cx| {
                         workspace
@@ -1031,12 +1041,11 @@ impl KnightCodePage {
             this.update_in(cx, |this, _window, cx| {
                 this.handoff_busy = false;
                 if let Err(error) = result {
-                    old_conversation
-                        .update(cx, |conversation, cx| {
-                            conversation
-                                .set_preserve_session_on_release(false, cx)
-                                .log_err();
-                        });
+                    old_conversation.update(cx, |conversation, cx| {
+                        conversation
+                            .set_preserve_session_on_release(false, cx)
+                            .log_err();
+                    });
                     this.chat_error =
                         Some(format!("Could not continue in Build: {error:#}").into());
                 }

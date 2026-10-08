@@ -154,6 +154,15 @@ function GenerateLicenses {
 }
 
 function BuildZedAndItsFriends {
+    # Check the full application (including zed's main.rs), not only the UI
+    # libraries. Use the same config, profile, packages, target and environment
+    # as the release build so context/API errors fail before code generation.
+    Write-Output "Type-checking all KnightCode Windows application targets"
+    cargo --config .cargo/bundle-config.toml check --release --package zed --package cli --package auto_update_helper --target $target
+    if ($LASTEXITCODE -ne 0) {
+        throw "Windows application type-check failed; the release build was not started."
+    }
+
     Write-Output "Building KnightCode and its friends, for channel: $channel"
     # Build zed.exe, cli.exe and auto_update_helper.exe
     cargo --config .cargo/bundle-config.toml build --release --package zed --package cli --package auto_update_helper --target $target
