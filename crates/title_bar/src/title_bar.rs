@@ -268,9 +268,11 @@ impl Render for TitleBar {
 
         let chat = self.knightcode_mode == KnightCodeMode::Chat;
         let build = self.knightcode_mode == KnightCodeMode::Build;
+        let home = self.knightcode_mode == KnightCodeMode::Home;
         self.platform_titlebar.update(cx, |bar, cx| {
             bar.set_knightcode_chat(chat, cx);
             bar.set_knightcode_build(build, cx);
+            bar.set_knightcode_home(home, cx);
         });
         if let Some(menu) = &self.application_menu {
             let wide = f32::from(window.viewport_size().width) >= 1200.;
@@ -284,6 +286,13 @@ impl Render for TitleBar {
         }
         if chat {
             let controls = self.render_chat_title_bar(cx).into_any_element();
+            self.platform_titlebar
+                .update(cx, |bar, _| bar.set_children([controls]));
+            return self.platform_titlebar.clone().into_any_element();
+        }
+
+        if home {
+            let controls = self.render_home_title_bar(window, cx).into_any_element();
             self.platform_titlebar
                 .update(cx, |bar, _| bar.set_children([controls]));
             return self.platform_titlebar.clone().into_any_element();
@@ -935,6 +944,138 @@ impl TitleBar {
                     Label::new(status)
                         .size(LabelSize::Small)
                         .color(Color::Muted),
+                )
+            })
+    }
+
+    fn render_home_title_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let compact = f32::from(window.viewport_size().width) < 1050.;
+        h_flex()
+            .w_full()
+            .h_full()
+            .relative()
+            .key_context("KnightCodeHome")
+            .justify_between()
+            .px_8()
+            .child(
+                ButtonLike::new("home-brand")
+                    .height(px(56.).into())
+                    .style(ButtonStyle::Transparent)
+                    .aria_label("KnightCode Home")
+                    .tooltip(Tooltip::text("Home"))
+                    .child(
+                        h_flex()
+                            .text_size(px(24.))
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .child(div().text_color(gpui::rgb(0xf4f7ff)).child("Knight"))
+                            .child(div().text_color(gpui::rgb(0x9293ff)).child("Code")),
+                    )
+                    .on_click(|_, window, cx| window.dispatch_action(ShowHome.boxed_clone(), cx)),
+            )
+            .child(
+                h_flex()
+                    .gap_4()
+                    .h_full()
+                    .when(compact, |row| {
+                        row.child(
+                            IconButton::new("home-compact-search", IconName::MagnifyingGlass)
+                                .tooltip(Tooltip::text(
+                                    "Search files, symbols, commands, or ask KnightCode",
+                                ))
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(
+                                        zed_actions::command_palette::Toggle.boxed_clone(),
+                                        cx,
+                                    )
+                                }),
+                        )
+                    })
+                    .child(
+                        IconButton::new("home-settings", IconName::Settings)
+                            .icon_size(IconSize::Medium)
+                            .icon_color(Color::Custom(gpui::rgb(0xe6efff).into()))
+                            .tooltip(Tooltip::for_action_title(
+                                "Settings",
+                                &zed_actions::OpenSettings,
+                            ))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(zed_actions::OpenSettings.boxed_clone(), cx)
+                            }),
+                    )
+                    .child(
+                        div()
+                            .h(px(30.))
+                            .border_r_1()
+                            .border_color(gpui::rgb(0x244768)),
+                    ),
+            )
+            .when(!compact, |bar| {
+                bar.child(
+                    div()
+                        .absolute()
+                        .left(relative(0.5))
+                        .ml(px(-246.))
+                        .w(px(620.))
+                        .rounded_lg()
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(gpui::rgb(0x255080))
+                        .bg(gpui::rgb(0x071426))
+                        .child(
+                            PopoverMenu::new("home-global-search")
+                                .trigger_with_tooltip(
+                                    ButtonLike::new("home-search")
+                                        .full_width()
+                                        .height(px(40.).into())
+                                        .style(ButtonStyle::Transparent)
+                                        .aria_label("Search files, symbols, or ask KnightCode")
+                                        .child(
+                                            h_flex()
+                                                .w_full()
+                                                .px_3()
+                                                .gap_3()
+                                                .child(Icon::new(IconName::MagnifyingGlass).color(
+                                                    Color::Custom(gpui::rgb(0xdfedff).into()),
+                                                ))
+                                                .child(
+                                                    Label::new(
+                                                        "Search files, symbols, or ask KnightCode…",
+                                                    )
+                                                    .size(LabelSize::Small)
+                                                    .color(Color::Custom(
+                                                        gpui::rgb(0xc6d9f6).into(),
+                                                    )),
+                                                )
+                                                .child(div().flex_1())
+                                                .child(ui::KeyBinding::for_action(
+                                                    &zed_actions::command_palette::Toggle,
+                                                    cx,
+                                                )),
+                                        ),
+                                    Tooltip::text(
+                                        "Search files, symbols and commands, or open Chat",
+                                    ),
+                                )
+                                .menu(|window, cx| {
+                                    Some(ContextMenu::build(window, cx, |menu, _, _| {
+                                        menu.action(
+                                            "Search files",
+                                            workspace::ToggleFileFinder::default().boxed_clone(),
+                                        )
+                                        .action(
+                                            "Search symbols",
+                                            workspace::ToggleProjectSymbols.boxed_clone(),
+                                        )
+                                        .action(
+                                            "Search commands",
+                                            zed_actions::command_palette::Toggle.boxed_clone(),
+                                        )
+                                        .action("Ask KnightCode", ShowChat.boxed_clone())
+                                        .action("Models", ShowModels.boxed_clone())
+                                        .action("Account", ShowAccount.boxed_clone())
+                                    }))
+                                }),
+                        ),
                 )
             })
     }

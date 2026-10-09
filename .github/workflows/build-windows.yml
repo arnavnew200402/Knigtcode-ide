@@ -107,9 +107,15 @@ jobs:
         run: |
           node script/check-build-workbench.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Native Build source/artwork validation failed.' }
+          node script/check-home-design.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Native Home source/artwork validation failed.' }
           rustfmt --edition 2024 --check `
             crates/knightcode_onboarding/src/build_layout.rs `
             crates/knightcode_onboarding/src/build_welcome.rs `
+            crates/knightcode_onboarding/src/workspace_modes.rs `
+            crates/knightcode_onboarding/src/workspace_modes/home_presentation.rs `
+            crates/title_bar/src/title_bar.rs `
+            crates/platform_title_bar/src/platform_title_bar.rs `
             crates/agent_ui/src/conversation_view/thread_view/build_presentation.rs
           if ($LASTEXITCODE -ne 0) { throw 'Native Build formatting failed.' }
 

@@ -1,12 +1,11 @@
+mod home_presentation;
+
 use std::{collections::HashMap, sync::Arc};
 
-use acp_thread::AcpThread;
-use agent_client_protocol::schema::v1 as acp;
 use agent_ui::{
     Agent, AgentPanel, AgentThreadSource, ConversationView, NewThread,
     thread_metadata_store::{ThreadId, ThreadMetadata, ThreadMetadataStore, WorktreePaths},
 };
-use anyhow::{Context as _, Result, anyhow};
 use chrono::{Local, Utc};
 use editor::Editor;
 use gpui::{
@@ -14,7 +13,6 @@ use gpui::{
     Focusable, Global, Image, ImageFormat, KeyContext, PathBuilder, Render, Subscription, Task,
     WeakEntity, Window, canvas, div, img, linear_color_stop, linear_gradient, point, rgb, rgba,
 };
-use knightcode_engine::session_controls::SessionMode;
 use knightcode_models::{LocalModelsView, ModelPicker, SignInView, State};
 use language_model::AuthenticateError;
 use remote::RemoteConnectionOptions;
@@ -62,6 +60,15 @@ impl Page {
 
 pub(super) fn init(cx: &mut App) {
     super::build_layout::init(cx);
+    cx.bind_keys([gpui::KeyBinding::new(
+        if cfg!(target_os = "macos") {
+            "cmd-k"
+        } else {
+            "ctrl-k"
+        },
+        zed_actions::command_palette::Toggle,
+        Some("KnightCodeHome"),
+    )]);
     cx.default_global::<WorkspaceModesRegistry>();
     cx.observe_new(|workspace: &mut Workspace, window, cx| {
         if let Some(window) = window {
@@ -188,12 +195,8 @@ fn install(
         });
         WorkspaceModes {
             workspace: workspace_handle.clone(),
-            requested_mode: None,
             chat_page: None,
             cached_pages: Vec::new(),
-            panel: None,
-            policy_task: None,
-            policy_subscription: None,
             build_item: None,
             build_docks: None,
             build_pane: None,
@@ -300,12 +303,8 @@ fn install(
 
 struct WorkspaceModes {
     workspace: WeakEntity<Workspace>,
-    requested_mode: Option<KnightCodeMode>,
     chat_page: Option<Entity<KnightCodePage>>,
     cached_pages: Vec<Entity<KnightCodePage>>,
-    panel: Option<Entity<AgentPanel>>,
-    policy_task: Option<Task<()>>,
-    policy_subscription: Option<Subscription>,
     build_item: Option<Box<dyn WeakItemHandle>>,
     build_docks: Option<DockStructure>,
     build_pane: Option<WeakEntity<Pane>>,
@@ -333,125 +332,8 @@ impl WorkspaceModes {
         // missing agent, an empty draft, or an agent without session-mode
         // support leaves the mode switch permanently stuck on the previous
         // page.
-        self.requested_mode = None;
-        self.policy_task = None;
-        self.policy_subscription = None;
         set_title_bar_operation(workspace, None, false, cx);
         self.show_ready(workspace, page, window, cx);
-    }
-
-    fn request_policy(
-        &mut self,
-        workspace: &mut Workspace,
-        mode: KnightCodeMode,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.requested_mode.is_some() {
-            return;
-        }
-        let panel = workspace.panel::<AgentPanel>(cx);
-        let has_conversation = panel
-            .as_ref()
-            .is_some_and(|panel| panel.read(cx).active_conversation_view().is_some());
-        if mode == KnightCodeMode::Build && !has_conversation {
-            self.build_ready(workspace, window, cx);
-            return;
-        }
-        let Some(panel) = panel else {
-            set_title_bar_operation(
-                workspace,
-                Some("The agent panel is loading. Retry shortly.".into()),
-                false,
-                cx,
-            );
-            return;
-        };
-        if mode == KnightCodeMode::Chat {
-            let existing_chat = workspace
-                .items_of_type::<KnightCodePage>(cx)
-                .find(|item| item.read(cx).page == Page::Chat);
-            let item = existing_chat
-                .or_else(|| self.chat_page.clone())
-                .unwrap_or_else(|| {
-                    cx.new(|cx| KnightCodePage::new(self.workspace.clone(), Page::Chat, window, cx))
-                });
-            item.update(cx, |item, cx| {
-                item.attach_panel(Some(panel.clone()), cx);
-                item.prepare_chat(window, cx);
-            });
-            self.chat_page = Some(item);
-        }
-        self.requested_mode = Some(mode);
-        self.panel = Some(panel.clone());
-        self.policy_subscription = Some(cx.observe_in(&panel, window, |this, _, window, cx| {
-            this.advance_policy(window, cx);
-        }));
-        set_title_bar_operation(
-            workspace,
-            Some(format!("Opening {mode:?}…").into()),
-            true,
-            cx,
-        );
-        self.advance_policy(window, cx);
-    }
-
-    fn advance_policy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.policy_task.is_some() {
-            return;
-        }
-        let Some(mode) = self.requested_mode else {
-            return;
-        };
-        let thread = self
-            .panel
-            .as_ref()
-            .and_then(|panel| panel.read(cx).active_conversation_view())
-            .and_then(|conversation| conversation.read(cx).root_thread_view())
-            .map(|view| view.read(cx).thread.clone());
-        let Some(thread) = thread else {
-            return;
-        };
-        let mode_task = set_session_mode(
-            &thread,
-            match mode {
-                KnightCodeMode::Chat => SessionMode::Chat,
-                _ => SessionMode::Build,
-            },
-            cx,
-        );
-        let workspace = self.workspace.clone();
-        self.policy_task = Some(cx.spawn_in(window, async move |this, cx| {
-            let result = mode_task.await;
-            this.update_in(cx, |this, window, cx| {
-                this.policy_task = None;
-                this.policy_subscription = None;
-                this.requested_mode = None;
-                workspace
-                    .update(cx, |workspace, cx| match result {
-                        Ok(()) => {
-                            set_title_bar_operation(workspace, None, false, cx);
-                            if mode == KnightCodeMode::Chat {
-                                this.show_ready(workspace, Page::Chat, window, cx);
-                            } else {
-                                this.build_ready(workspace, window, cx);
-                            }
-                        }
-                        Err(error) => {
-                            set_title_bar_operation(
-                                workspace,
-                                Some(format!("Could not enter {mode:?}: {error:#}").into()),
-                                false,
-                                cx,
-                            );
-                        }
-                    })
-                    .log_err();
-                cx.notify();
-            })
-            .log_err();
-        }));
-        cx.notify();
     }
 
     fn show_ready(
@@ -611,9 +493,6 @@ impl WorkspaceModes {
         // Build is the normal Zed workspace. Restore the docks and the
         // pre-existing editor before activating the item, rather than waiting
         // for a Chat conversation or an ACP session-mode request.
-        self.requested_mode = None;
-        self.policy_task = None;
-        self.policy_subscription = None;
         if self.build_docks.is_some() {
             self.restore(workspace, window, cx);
         }
@@ -744,63 +623,6 @@ impl WorkspaceModes {
     }
 }
 
-fn root_thread(workspace: &Workspace, cx: &App) -> Option<Entity<AcpThread>> {
-    workspace
-        .panel::<AgentPanel>(cx)
-        .and_then(|panel| panel.read(cx).active_conversation_view().cloned())
-        .and_then(|conversation| conversation.read(cx).root_thread_view())
-        .map(|view| view.read(cx).thread.clone())
-}
-
-fn session_policy_value(thread: &Entity<AcpThread>, config_id: &str, cx: &App) -> Option<String> {
-    let thread = thread.read(cx);
-    if config_id == "mode" {
-        return thread
-            .connection()
-            .session_modes(thread.session_id(), cx)
-            .map(|modes| modes.current_mode().0.to_string());
-    }
-    thread
-        .connection()
-        .session_config_options(thread.session_id(), cx)
-        .and_then(|options| {
-            options.config_options().into_iter().find_map(|option| {
-                if option.id.0.as_ref() == config_id
-                    && let acp::SessionConfigKind::Select(select) = option.kind
-                {
-                    Some(select.current_value.0.to_string())
-                } else {
-                    None
-                }
-            })
-        })
-}
-
-fn set_session_mode(
-    thread: &Entity<AcpThread>,
-    mode: SessionMode,
-    cx: &mut App,
-) -> Task<Result<()>> {
-    let current = session_policy_value(thread, "mode", cx);
-    let thread = thread.read(cx);
-    if thread.parent_session_id().is_some()
-        || thread.connection().agent_id() != Agent::NativeAgent.id()
-    {
-        return Task::ready(Err(anyhow!(
-            "Mode controls require the KnightCode parent conversation"
-        )));
-    }
-    if current.as_deref() == Some(mode.as_str()) {
-        return Task::ready(Ok(()));
-    }
-    if let Some(modes) = thread.connection().session_modes(thread.session_id(), cx) {
-        return modes.set_mode(acp::SessionModeId::new(mode.as_str()), cx);
-    }
-    Task::ready(Err(anyhow!(
-        "The KnightCode engine does not offer session mode controls"
-    )))
-}
-
 fn set_title_bar_operation(
     workspace: &Workspace,
     message: Option<SharedString>,
@@ -845,11 +667,6 @@ pub struct KnightCodePage {
     recent_task: Option<Task<()>>,
     state_task: Option<Task<()>>,
     chat_task: Option<Task<()>>,
-    handoff_intent: Entity<Editor>,
-    handoff_plan: Entity<Editor>,
-    handoff_project: Option<std::path::PathBuf>,
-    handoff_task: Option<Task<()>>,
-    handoff_busy: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -863,24 +680,6 @@ impl KnightCodePage {
         let search = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
             editor.set_placeholder_text("Search chats…", window, cx);
-            editor
-        });
-        let handoff_intent = cx.new(|cx| {
-            let mut editor = Editor::multi_line(window, cx);
-            editor.set_placeholder_text("What should be built?", window, cx);
-            editor.set_mode(editor::EditorMode::AutoHeight {
-                min_lines: 2,
-                max_lines: Some(6),
-            });
-            editor
-        });
-        let handoff_plan = cx.new(|cx| {
-            let mut editor = Editor::multi_line(window, cx);
-            editor.set_placeholder_text("Optional plan or constraints", window, cx);
-            editor.set_mode(editor::EditorMode::AutoHeight {
-                min_lines: 2,
-                max_lines: Some(6),
-            });
             editor
         });
         let mut subscriptions = vec![cx.observe(&search, |_, _, cx| cx.notify())];
@@ -914,11 +713,6 @@ impl KnightCodePage {
             recent_task: None,
             state_task: None,
             chat_task: None,
-            handoff_intent,
-            handoff_plan,
-            handoff_project: None,
-            handoff_task: None,
-            handoff_busy: false,
             _subscriptions: subscriptions,
         };
         this.refresh_state(cx);
@@ -1126,137 +920,6 @@ impl KnightCodePage {
         });
         self.chat_error = None;
         cx.notify();
-    }
-
-    fn choose_handoff_project(&mut self, cx: &mut Context<Self>) {
-        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some("Choose a project folder".into()),
-        });
-        self.handoff_task = Some(cx.spawn(async move |this, cx| {
-            let selected = receiver.await.ok().and_then(Result::ok).flatten();
-            if let Some(path) = selected.and_then(|paths| paths.into_iter().next()) {
-                this.update(cx, |this, cx| {
-                    this.handoff_project = Some(path);
-                    cx.notify();
-                })
-                .ok();
-            }
-        }));
-    }
-
-    fn handoff_to_build(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.handoff_busy {
-            return;
-        }
-        let Some(workspace) = self.workspace.upgrade() else {
-            return;
-        };
-        let Some(conversation) = self.conversation_view(cx) else {
-            self.chat_error = Some("The conversation is still loading.".into());
-            cx.notify();
-            return;
-        };
-        let current_cwd = workspace.read(cx).project().read(cx).default_path_list(cx);
-        let cwd = self
-            .handoff_project
-            .clone()
-            .or_else(|| current_cwd.ordered_paths().next().cloned());
-        let Some(cwd) = cwd else {
-            self.chat_error = Some("Choose a project folder before continuing in Build.".into());
-            cx.notify();
-            return;
-        };
-        let text = nonempty_editor_text(&self.handoff_intent, cx);
-        let plan = nonempty_editor_text(&self.handoff_plan, cx);
-        let connection = conversation.read(cx).connection();
-        let Some(connection) = connection else {
-            self.chat_error = Some("The ACP connection is unavailable.".into());
-            cx.notify();
-            return;
-        };
-        let thread_id = conversation.read(cx).parent_id();
-        self.handoff_busy = true;
-        self.chat_error = None;
-        let source_workspace = workspace.clone();
-        let old_conversation = conversation.clone();
-        self.handoff_task = Some(cx.spawn_in(window, async move |this, cx| {
-            let result = async {
-                let target_workspace = source_workspace
-                    .update_in(cx, |workspace, window, cx| {
-                        workspace.open_workspace_for_paths(
-                            OpenMode::NewWindow,
-                            vec![cwd.clone()],
-                            window,
-                            cx,
-                        )
-                    })?
-                    .await?;
-                let (target_project, work_dirs, worktree_paths) =
-                    target_workspace.read_with(cx, |workspace, cx| {
-                        let target_project = workspace.project().clone();
-                        let work_dirs = target_project.read(cx).default_path_list(cx);
-                        let worktree_paths = target_project.read(cx).worktree_paths(cx);
-                        (target_project, work_dirs, worktree_paths)
-                    });
-                let target_panel =
-                    target_workspace.update_in(cx, |workspace, _window, cx| {
-                        workspace
-                            .panel::<AgentPanel>(cx)
-                            .context("The target workspace agent panel is unavailable")
-                    })??;
-                let handoff = conversation.update_in(cx, |conversation, _window, cx| {
-                    conversation.handoff_to_project(
-                        cwd.clone(),
-                        text.clone(),
-                        plan.clone(),
-                        target_project.clone(),
-                        cx,
-                    )
-                })??;
-                let _thread = handoff.await?;
-                target_workspace.update_in(cx, |workspace, window, cx| {
-                    target_panel.update(cx, |panel, cx| {
-                        panel.adopt_connection(Agent::NativeAgent, connection.clone(), cx);
-                        panel.load_agent_thread(
-                            Agent::NativeAgent,
-                            thread_id,
-                            Some(work_dirs.clone()),
-                            None,
-                            true,
-                            AgentThreadSource::AgentPanel,
-                            window,
-                            cx,
-                        );
-                        ThreadMetadataStore::global(cx).update(cx, |store, cx| {
-                            store.update_worktree_paths(&[thread_id], worktree_paths.clone(), cx);
-                            store.update_working_directories(thread_id, work_dirs.clone(), cx);
-                        });
-                        Ok::<(), anyhow::Error>(())
-                    })?;
-                    show_build_in_workspace(workspace, window, cx);
-                    Ok::<(), anyhow::Error>(())
-                })??;
-                Ok::<(), anyhow::Error>(())
-            }
-            .await;
-            this.update_in(cx, |this, _window, cx| {
-                this.handoff_busy = false;
-                if let Err(error) = result {
-                    old_conversation.update(cx, |conversation, cx| {
-                        conversation
-                            .set_preserve_session_on_release(false, cx)
-                            .log_err();
-                    });
-                    this.chat_error =
-                        Some(format!("Could not continue in Build: {error:#}").into());
-                }
-                cx.notify();
-            })
-            .log_err();
-        }));
     }
 
     fn open_recent(
@@ -1643,112 +1306,6 @@ impl KnightCodePage {
             )
     }
 
-    fn render_home(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut recent_cards = Vec::<AnyElement>::new();
-        for recent in self.recent.as_ref().into_iter().flatten().take(3) {
-            let name = recent
-                .identity_paths
-                .paths()
-                .iter()
-                .filter_map(|path| path.file_name())
-                .map(|name| name.to_string_lossy().into_owned())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let paths = recent
-                .paths
-                .paths()
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let timestamp = recent
-                .timestamp
-                .with_timezone(&Local)
-                .format("%b %-d, %Y · %H:%M")
-                .to_string();
-            let icon = match recent.location {
-                SerializedWorkspaceLocation::Local => IconName::Folder,
-                SerializedWorkspaceLocation::Remote(_) => IconName::Server,
-            };
-            let recent = recent.clone();
-            recent_cards.push(
-                div()
-                    .flex_1()
-                    .min_w(px(220.))
-                    .rounded_xl()
-                    .border_1()
-                    .border_color(rgba(0x826eff33))
-                    .bg(rgba(0x100c2ac7))
-                    .child(
-                        ButtonLike::new(format!("recent-{}", i64::from(recent.workspace_id)))
-                            .full_width()
-                            .child(
-                                h_flex()
-                                    .min_w_0()
-                                    .gap_3()
-                                    .p_3()
-                                    .child(
-                                        Icon::new(icon).color(Color::Custom(rgb(0xb19bff).into())),
-                                    )
-                                    .child(
-                                        v_flex()
-                                            .min_w_0()
-                                            .gap_1()
-                                            .child(Label::new(name).truncate())
-                                            .child(
-                                                Label::new(paths)
-                                                    .truncate()
-                                                    .size(LabelSize::Small)
-                                                    .color(Color::Muted),
-                                            )
-                                            .child(
-                                                Label::new(timestamp)
-                                                    .size(LabelSize::XSmall)
-                                                    .color(Color::Muted),
-                                            ),
-                                    ),
-                            )
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.open_recent(recent.clone(), window, cx)
-                            })),
-                    )
-                    .into_any_element(),
-            );
-        }
-        v_flex().id("home-content").size_full().p_8().gap_6().overflow_y_scroll()
-            .child(h_flex().w_full().gap_6().justify_between()
-                .child(v_flex().flex_1().gap_3().justify_center()
-                    .child(Label::new("THINK › BUILD › BEYOND").size(LabelSize::Small).color(Color::Custom(rgb(0x9aa0d6).into())))
-                    .child(div().text_size(px(44.)).font_weight(gpui::FontWeight::BOLD).child("Turn your ideas"))
-                    .child(div().text_size(px(44.)).font_weight(gpui::FontWeight::BOLD).text_color(rgb(0xb19bff)).child("into real impact."))
-                    .child(Label::new("Chat with AI, or open a project and start building.").color(Color::Custom(rgb(0xb7bad8).into())))
-                    .child(Label::new("Same intelligence. More possibilities.").color(Color::Custom(rgb(0xb7bad8).into()))))
-                .child(img(self.logo.clone()).size(px(300.)).flex_none()))
-            .child(h_flex().w_full().flex_wrap().gap_4()
-                .child(v_flex().flex_1().min_w(px(240.)).p_5().gap_3().rounded_xl().border_1().border_color(rgba(0x826eff33)).bg(rgba(0x100c2ac7))
-                    .child(Icon::new(IconName::Chat).color(Color::Custom(rgb(0xb19bff).into())))
-                    .child(Headline::new("Chat"))
-                    .child(Label::new("Ask, explore, brainstorm and get instant answers.").color(Color::Muted))
-                    .child(Button::new("start-chat", "Start Chatting →").full_width().style(ButtonStyle::Tinted(TintColor::Accent))
-                        .on_click(|_, window, cx| window.dispatch_action(ShowChat.boxed_clone(), cx))))
-                .child(v_flex().flex_1().min_w(px(240.)).p_5().gap_3().rounded_xl().border_1().border_color(rgba(0x826eff33)).bg(rgba(0x100c2ac7))
-                    .child(Icon::new(IconName::Code).color(Color::Custom(rgb(0xd9956c).into())))
-                    .child(Headline::new("Build"))
-                    .child(Label::new("Open a project, write code, run commands and build with AI.").color(Color::Muted))
-                    .child(Button::new("open-project", "Open Project →").full_width().style(ButtonStyle::Tinted(TintColor::Accent))
-                        .on_click(|_, window, cx| window.dispatch_action(workspace::Open::default().boxed_clone(), cx)))))
-            .child(h_flex().justify_between()
-                .child(h_flex().gap_2().child(Icon::new(IconName::Clock)).child(Label::new("Recent")))
-                .child(Button::new("all-projects", "View all →").on_click(|_, window, cx| {
-                    window.dispatch_action(zed_actions::OpenRecent::default().boxed_clone(), cx);
-                })))
-            .when_some(self.recent_error.clone(), |content, error| content.child(Label::new(error).color(Color::Error)))
-            .child(h_flex().w_full().flex_wrap().gap_3()
-                .when(self.recent.is_none() && self.recent_error.is_none(), |recent| recent.child(div().p_3().child(Label::new("Loading recent projects…").color(Color::Muted))))
-                .when(self.recent.as_ref().is_some_and(Vec::is_empty), |recent| recent.child(div().p_3().child(Label::new("Your recent projects will appear here after you open a folder.").color(Color::Muted))))
-                .children(recent_cards))
-    }
-
     fn render_chat(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_active = self.workspace.upgrade().is_some_and(|workspace| {
             workspace
@@ -1878,11 +1435,6 @@ impl KnightCodePage {
     }
 }
 
-fn nonempty_editor_text(editor: &Entity<Editor>, cx: &App) -> Option<String> {
-    let text = editor.read(cx).text(cx);
-    (!text.trim().is_empty()).then_some(text)
-}
-
 impl Render for KnightCodePage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.page == Page::Chat {
@@ -1897,7 +1449,7 @@ impl Render for KnightCodePage {
             }
         }
         let content = match self.page {
-            Page::Home => self.render_home(cx).into_any_element(),
+            Page::Home => home_presentation::render(self, window, cx),
             Page::Chat => self.render_chat(window, cx).into_any_element(),
             Page::Models | Page::Account => {
                 self.render_configuration(window, cx).into_any_element()
@@ -1905,6 +1457,9 @@ impl Render for KnightCodePage {
         };
         let mut key_context = KeyContext::new_with_defaults();
         key_context.add("KnightCodePage");
+        if self.page == Page::Home {
+            key_context.add("KnightCodeHome");
+        }
         if self.page == Page::Chat {
             key_context.add("KnightCodeChat");
             key_context.add("AgentPanel");
@@ -1966,10 +1521,12 @@ impl Render for KnightCodePage {
                     }
                 },
             ))
-            .when(self.page != Page::Chat, |page| {
+            .when(matches!(self.page, Page::Models | Page::Account), |page| {
                 page.child(scenic_background())
             })
-            .child(self.render_navigation(cx))
+            .when(self.page != Page::Home, |page| {
+                page.child(self.render_navigation(cx))
+            })
             .child(
                 div()
                     .relative()

@@ -27,6 +27,7 @@ pub use system_window_tabs::{
 
 /// Shared by the Chat brand, mode switch and native window controls.
 pub const KNIGHTCODE_CHAT_TITLE_BAR_HEIGHT: f32 = 48.;
+pub const KNIGHTCODE_HOME_TITLE_BAR_HEIGHT: f32 = 64.;
 
 pub struct PlatformTitleBar {
     id: ElementId,
@@ -38,6 +39,7 @@ pub struct PlatformTitleBar {
     multi_workspace: Option<WeakEntity<MultiWorkspace>>,
     knightcode_chat: bool,
     knightcode_build: bool,
+    knightcode_home: bool,
 }
 
 impl PlatformTitleBar {
@@ -55,6 +57,7 @@ impl PlatformTitleBar {
             multi_workspace: None,
             knightcode_chat: false,
             knightcode_build: false,
+            knightcode_home: false,
         }
     }
 
@@ -81,7 +84,17 @@ impl PlatformTitleBar {
         }
     }
 
+    pub fn set_knightcode_home(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.knightcode_home != enabled {
+            self.knightcode_home = enabled;
+            cx.notify();
+        }
+    }
+
     pub fn title_bar_color(&self, window: &mut Window, cx: &mut Context<Self>) -> Hsla {
+        if self.knightcode_home {
+            return gpui::rgb(0x040b17).into();
+        }
         if self.knightcode_chat {
             return gpui::rgb(0x090d17).into();
         }
@@ -228,6 +241,8 @@ impl Render for PlatformTitleBar {
             px(KNIGHTCODE_CHAT_TITLE_BAR_HEIGHT)
         } else if self.knightcode_build {
             px(58.)
+        } else if self.knightcode_home {
+            px(KNIGHTCODE_HOME_TITLE_BAR_HEIGHT)
         } else {
             platform_title_bar_height(window)
         };
@@ -236,7 +251,7 @@ impl Render for PlatformTitleBar {
         let children = mem::take(&mut self.children);
 
         let button_layout = self.effective_button_layout(&decorations, cx);
-        let sidebar = if self.knightcode_chat {
+        let sidebar = if self.knightcode_chat || self.knightcode_home {
             SidebarRenderState::default()
         } else {
             self.sidebar_render_state(cx)
@@ -383,12 +398,10 @@ impl Render for PlatformTitleBar {
                 },
             );
 
-        v_flex()
-            .w_full()
-            .child(title_bar)
-            .when(!self.knightcode_chat && !self.knightcode_build, |bar| {
-                bar.child(self.system_window_tabs.clone().into_any_element())
-            })
+        v_flex().w_full().child(title_bar).when(
+            !self.knightcode_chat && !self.knightcode_build && !self.knightcode_home,
+            |bar| bar.child(self.system_window_tabs.clone().into_any_element()),
+        )
     }
 }
 
