@@ -7162,6 +7162,7 @@ impl Render for ProjectPanel {
         // version that understands these messages.
         let is_collab = project.is_via_collab();
         let is_local = project.is_local();
+        let is_read_only = project.is_read_only(cx);
         let workspace = self.workspace.upgrade();
         let build = workspace
             .as_ref()
@@ -7847,7 +7848,7 @@ impl Render for ProjectPanel {
                                 .child(
                                     IconButton::new("build-new-file", IconName::File)
                                         .tooltip(Tooltip::text("New File"))
-                                        .disabled(!has_worktree || project.is_read_only(cx))
+                                        .disabled(!has_worktree || is_read_only)
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.new_file(&NewFile, window, cx)
                                         })),
@@ -7855,7 +7856,7 @@ impl Render for ProjectPanel {
                                 .child(
                                     IconButton::new("build-new-folder", IconName::FolderAdd)
                                         .tooltip(Tooltip::text("New Folder"))
-                                        .disabled(!has_worktree || project.is_read_only(cx))
+                                        .disabled(!has_worktree || is_read_only)
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.new_directory(&NewDirectory, window, cx)
                                         })),
