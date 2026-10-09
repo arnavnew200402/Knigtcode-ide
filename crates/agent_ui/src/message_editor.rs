@@ -2173,15 +2173,31 @@ impl Render for MessageEditor {
                     } else {
                         settings.agent_buffer_font_family().clone()
                     },
-                    font_fallbacks: settings.buffer_font.fallbacks.clone(),
-                    font_features: settings.buffer_font.features.clone(),
+                    font_fallbacks: if self.full_page_chat {
+                        settings.ui_font.fallbacks.clone()
+                    } else {
+                        settings.buffer_font.fallbacks.clone()
+                    },
+                    font_features: if self.full_page_chat {
+                        settings.ui_font.features.clone()
+                    } else {
+                        settings.buffer_font.features.clone()
+                    },
                     font_size: if self.full_page_chat || self.build_presentation {
                         settings.agent_ui_font_size(cx).into()
                     } else {
                         settings.agent_buffer_font_size(cx).into()
                     },
-                    font_weight: settings.buffer_font.weight,
-                    line_height: relative(settings.buffer_line_height.value()),
+                    font_weight: if self.full_page_chat {
+                        settings.ui_font.weight
+                    } else {
+                        settings.buffer_font.weight
+                    },
+                    line_height: relative(if self.full_page_chat {
+                        1.4
+                    } else {
+                        settings.buffer_line_height.value()
+                    }),
                     ..Default::default()
                 };
 

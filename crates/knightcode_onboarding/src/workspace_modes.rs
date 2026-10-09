@@ -461,6 +461,7 @@ impl WorkspaceModes {
         window: &mut Window,
         cx: &mut App,
     ) {
+        workspace.set_knightcode_chat(page == Page::Chat, cx);
         if let Some(previous) = self.previous_build_theme.take() {
             // The workbench theme is temporary; never rewrite the user's
             // persisted theme or undo a theme they selected while in Build.
@@ -563,6 +564,7 @@ impl WorkspaceModes {
     }
 
     fn restore(&mut self, workspace: &mut Workspace, window: &mut Window, cx: &mut App) {
+        workspace.set_knightcode_chat(false, cx);
         // This also runs when an editor is activated outside the mode switch.
         // Do not leave the full-page Chat layout inside Build's agent dock.
         if let Some(conversation) = workspace
@@ -585,7 +587,7 @@ impl WorkspaceModes {
         }
         if let Some(pane) = self.page_pane.take().and_then(|pane| pane.upgrade()) {
             pane.update(cx, |pane, cx| {
-                pane.set_should_display_tab_bar(|pane, _| {
+                pane.set_should_display_tab_bar_with_pane(|pane, _, _| {
                     pane.active_item().is_some_and(|item| {
                         item.downcast::<super::build_welcome::BuildWelcome>()
                             .is_none()
@@ -995,7 +997,9 @@ impl KnightCodePage {
         }
         let metadata = self.workspace.upgrade().and_then(|workspace| {
             let project = workspace.read(cx).project().read(cx);
-            let work_dirs = project.default_path_list(cx);
+            // The engine's fallback cwd is the home directory, but scratch
+            // conversations are persisted with no project worktree paths.
+            let work_dirs = project.worktree_paths(cx).folder_path_list().clone();
             let remote_connection = project.remote_connection_options(cx);
             let store = ThreadMetadataStore::try_global(cx)?;
             store
@@ -1442,30 +1446,21 @@ impl KnightCodePage {
         let project = workspace
             .as_ref()
             .map(|workspace| workspace.read(cx).project().clone());
-        let work_dirs = project
+        let mut threads = project
             .as_ref()
-            .map(|project| project.read(cx).default_path_list(cx));
-        let remote_connection = project
-            .as_ref()
-            .and_then(|project| project.read(cx).remote_connection_options(cx));
-        let mut threads = ThreadMetadataStore::try_global(cx)
-            .map(|store| {
-                store
-                    .read(cx)
-                    .entries()
-                    .filter(|metadata| {
-                        !metadata.archived
-                            && metadata.matches_remote_connection(remote_connection.as_ref())
-                            // Scratch Chat is the global conversation surface.
-                            // A project-backed page keeps its project-specific history.
-                            && work_dirs.as_ref().is_some_and(|paths| {
-                                paths.is_empty() || metadata.folder_paths() == paths
-                            })
-                            && (metadata.display_title().to_lowercase().contains(&query)
-                                || (metadata.is_draft() && "new chat".contains(&query)))
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>()
+            .and_then(|project| {
+                let store = ThreadMetadataStore::try_global(cx)?;
+                Some(
+                    store
+                        .read(cx)
+                        .entries_for_chat(project.read(cx), cx)
+                        .filter(|metadata| {
+                            metadata.display_title().to_lowercase().contains(&query)
+                                || (metadata.is_draft() && "new chat".contains(&query))
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
             })
             .unwrap_or_default();
         threads.sort_by_key(|metadata| std::cmp::Reverse(metadata.updated_at));

@@ -835,7 +835,7 @@ impl TitleBar {
                 div().w(px(260.)).flex_none().child(
                     ButtonLike::new("knightcode-chat-brand")
                         .full_width()
-                        .height(px(70.).into())
+                        .height(px(platform_title_bar::KNIGHTCODE_CHAT_TITLE_BAR_HEIGHT).into())
                         .style(ButtonStyle::Transparent)
                         .tooltip(Tooltip::text("Go to Home"))
                         .child(
@@ -843,10 +843,10 @@ impl TitleBar {
                                 .w_full()
                                 .px_4()
                                 .gap_3()
-                                .child(img(self.brand_icon.clone()).size(px(38.)).flex_none())
+                                .child(img(self.brand_icon.clone()).size(px(28.)).flex_none())
                                 .child(
                                     div()
-                                        .text_size(px(23.))
+                                        .text_size(px(18.))
                                         .font_weight(gpui::FontWeight::SEMIBOLD)
                                         .text_color(gpui::rgb(0xf3f0ff))
                                         .child("KnightCode"),
@@ -860,7 +860,7 @@ impl TitleBar {
             .child(
                 h_flex().flex_1().min_w_0().justify_center().child(
                     h_flex()
-                        .w(px(254.))
+                        .w(px(224.))
                         .p_1()
                         .gap_1()
                         .rounded_full()
@@ -901,7 +901,7 @@ impl TitleBar {
                                         .child(
                                             ButtonLike::new(id)
                                                 .full_width()
-                                                .height(px(40.).into())
+                                                .height(px(32.).into())
                                                 .style(ButtonStyle::Transparent)
                                                 .disabled(self.knightcode_operation_busy)
                                                 .child(

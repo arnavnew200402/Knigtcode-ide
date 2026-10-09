@@ -9,7 +9,8 @@ use gpui::{
 };
 use ui::{ButtonLike, KeyBinding, Tooltip, prelude::*};
 use util::ResultExt as _;
-use workspace::{Item, ItemEvent, Workspace};
+use workspace::{Item, Workspace, item::ItemEvent};
+use zed_actions::assistant::ToggleFocus;
 
 pub(super) struct BuildWelcome {
     workspace: WeakEntity<Workspace>,
@@ -113,7 +114,7 @@ impl Render for BuildWelcome {
                                     .child(Icon::new(IconName::PlayFilled).color(Color::Custom(rgb(0xffe4b9).into())))
                                     .child(Label::new("Code with Agent").color(Color::Custom(rgb(0xfff4e9).into())))
                                     .child(div().flex_1())
-                                    .child(KeyBinding::for_action(&agent_ui::ToggleFocus, cx)))
+                                    .child(KeyBinding::for_action(&ToggleFocus, cx)))
                                 .on_click(cx.listener(|this, _, window, cx| this.agent_action(None, window, cx)))))
                         .child(div().rounded_lg().overflow_hidden().border_1().border_color(rgba(0xa762243f)).bg(rgb(0x14100b))
                             .child(ButtonLike::new("build-open-file").full_width().height(px(52.).into())

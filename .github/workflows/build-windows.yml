@@ -188,6 +188,21 @@ jobs:
             throw 'Native Chat regression tests failed.'
           }
 
+      - name: Test Chat workspace chrome and Build restoration
+        if: ${{ inputs.run_chat_tests }}
+        shell: pwsh
+        timeout-minutes: 120
+        env:
+          ZED_HEADLESS: "1"
+          ZED_BUNDLE: "true"
+          GGML_NATIVE: "OFF"
+          PENDING_TRACES: "1"
+        run: |
+          cargo --config .cargo/bundle-config.toml test --release `
+            --package workspace --lib --jobs 2 `
+            --target x86_64-pc-windows-msvc test_chat_ -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Chat status bar/tab predicate regression tests failed.' }
+
       - name: Test native Build session and draft continuity
         if: ${{ inputs.run_build_tests }}
         shell: pwsh

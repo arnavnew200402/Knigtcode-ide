@@ -518,7 +518,7 @@ impl Render for VoiceInput {
                 .on_action(cx.listener(|this, _: &CancelRecording, _, cx| this.cancel(cx)))
                 .child(
                     div()
-                        .size(px(48.))
+                        .size(px(40.))
                         .rounded_full()
                         .border_1()
                         .border_color(gpui::rgba(0x8c83af30))
@@ -533,7 +533,7 @@ impl Render for VoiceInput {
                         .child(
                             ButtonLike::new("chat-voice-record")
                                 .full_width()
-                                .height(px(if self.copper { 52. } else { 48. }).into())
+                                .height(px(if self.copper { 52. } else { 40. }).into())
                                 .style(ButtonStyle::Transparent)
                                 .disabled(busy)
                                 .tooltip(Tooltip::text(label))

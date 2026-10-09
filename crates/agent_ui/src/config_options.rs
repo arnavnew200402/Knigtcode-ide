@@ -302,7 +302,7 @@ impl Render for ConfigOptionsView {
             return h_flex()
                 .min_w_0()
                 .flex_wrap()
-                .gap(if build { px(8.) } else { px(12.) })
+                .gap(px(8.))
                 .when(build, |row| row.w_full())
                 .children(self.selectors.iter().filter_map(|selector| {
                     let option = selector.read(cx).current_option()?;
@@ -317,7 +317,7 @@ impl Render for ConfigOptionsView {
                         || option.id.0.as_ref() == "thinking";
                     Some(
                         h_flex()
-                            .h(px(if build { 50. } else { 48. }))
+                            .h(px(if build { 50. } else { 40. }))
                             .when(build, |control| control.flex_1())
                             .min_w_0()
                             .px_2()
@@ -513,9 +513,6 @@ impl ConfigOptionSelector {
             Color::Custom(gpui::rgb(0xe6e2f4).into())
         } else {
             Color::Muted
-        })
-        .when(self.chat_presentation, |button| {
-            button.label_size(LabelSize::Default)
         })
         .end_icon(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted))
         .disabled(self.setting_value)

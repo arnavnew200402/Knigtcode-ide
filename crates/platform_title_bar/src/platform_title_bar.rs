@@ -25,6 +25,9 @@ pub use system_window_tabs::{
     DraggedWindowTab, MergeAllWindows, MoveTabToNewWindow, ShowNextWindowTab, ShowPreviousWindowTab,
 };
 
+/// Shared by the Chat brand, mode switch and native window controls.
+pub const KNIGHTCODE_CHAT_TITLE_BAR_HEIGHT: f32 = 48.;
+
 pub struct PlatformTitleBar {
     id: ElementId,
     platform_style: PlatformStyle,
@@ -222,7 +225,7 @@ impl Render for PlatformTitleBar {
         let supported_controls = window.window_controls();
         let decorations = window.window_decorations();
         let height = if self.knightcode_chat {
-            px(70.)
+            px(KNIGHTCODE_CHAT_TITLE_BAR_HEIGHT)
         } else if self.knightcode_build {
             px(58.)
         } else {

@@ -104,7 +104,7 @@ pub(super) fn enable(
     pane.update(cx, |pane, cx| {
         // Only the empty Build welcome surface is tabless. Real files retain
         // standard Zed tabs, splits, previews and navigation.
-        pane.set_should_display_tab_bar(|pane, _| {
+        pane.set_should_display_tab_bar_with_pane(|pane, _, _| {
             pane.active_item()
                 .is_some_and(|item| item.downcast::<BuildWelcome>().is_none())
         });

@@ -22,7 +22,7 @@ use fs::Fs;
 use futures::{FutureExt, future::Shared};
 use gpui::{AppContext as _, Entity, Global, Subscription, Task, TaskExt};
 pub use project::WorktreePaths;
-use project::{AgentId, linked_worktree_short_name};
+use project::{AgentId, Project, linked_worktree_short_name};
 use remote::{RemoteConnectionOptions, same_remote_connection_identity};
 use ui::{App, Context, SharedString, ThreadItemWorktreeInfo, WorktreeKind};
 use util::ResultExt as _;
@@ -630,6 +630,24 @@ impl ThreadMetadataStore {
             .filter_map(|s| self.threads.get(s))
             .filter(|s| !s.archived)
             .filter(move |s| s.matches_remote_connection(remote_connection))
+    }
+
+    /// Chat without a project shows all local conversations; project Chat
+    /// stays scoped to its worktrees and remote connection. Use actual roots,
+    /// not `default_path_list`, whose home-directory fallback is an engine cwd
+    /// and does not match the empty paths persisted for scratch conversations.
+    pub fn entries_for_chat<'a>(
+        &'a self,
+        project: &Project,
+        cx: &App,
+    ) -> impl Iterator<Item = &'a ThreadMetadata> + 'a {
+        let work_dirs = project.worktree_paths(cx).folder_path_list().clone();
+        let remote_connection = project.remote_connection_options(cx);
+        self.entries().filter(move |metadata| {
+            !metadata.archived
+                && metadata.matches_remote_connection(remote_connection.as_ref())
+                && (work_dirs.is_empty() || metadata.folder_paths() == &work_dirs)
+        })
     }
 
     /// Returns threads whose `main_worktree_paths` matches the given path list
@@ -2650,6 +2668,127 @@ mod tests {
             "Expected migration to pick up all 3 legacy threads even when \
              ThreadStore::reload has not yet completed, but got {} entries",
             list.len()
+        );
+    }
+
+    #[gpui::test(iterations = 5)]
+    async fn test_full_page_chat_history_uses_project_roots_not_fallback_cwd(
+        cx: &mut TestAppContext,
+    ) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree("/project-a", serde_json::json!({})).await;
+        let scratch = Project::test(fs.clone(), None::<&Path>, cx).await;
+        let project = Project::test(fs, [Path::new("/project-a")], cx).await;
+        let scratch_chat =
+            make_metadata("scratch", "Previous chat", Utc::now(), PathList::default());
+        let project_chat = make_metadata(
+            "project",
+            "Project chat",
+            Utc::now(),
+            PathList::new(&[Path::new("/project-a")]),
+        );
+        let mut archived =
+            make_metadata("archived", "Archived chat", Utc::now(), PathList::default());
+        archived.archived = true;
+        let scratch_id = scratch_chat.thread_id;
+        let project_id = project_chat.thread_id;
+        cx.update(|cx| {
+            ThreadMetadataStore::global(cx).update(cx, |store, cx| {
+                store.save_all(vec![scratch_chat, project_chat, archived], cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            assert!(
+                !scratch.read(cx).default_path_list(cx).is_empty(),
+                "Scratch still has an engine fallback cwd"
+            );
+            assert!(scratch.read(cx).worktree_paths(cx).is_empty());
+            let store = ThreadMetadataStore::global(cx).read(cx);
+            let ids = store
+                .entries_for_chat(scratch.read(cx), cx)
+                .map(|metadata| metadata.thread_id)
+                .collect::<HashSet<_>>();
+            assert_eq!(ids, HashSet::from_iter([scratch_id, project_id]));
+            let ids = store
+                .entries_for_chat(project.read(cx), cx)
+                .map(|metadata| metadata.thread_id)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                ids,
+                vec![project_id],
+                "Project Chat must not leak unrelated conversations"
+            );
+        });
+    }
+
+    #[gpui::test(iterations = 5)]
+    async fn test_full_page_chat_history_previous_conversation_survives_new_chat(
+        cx: &mut TestAppContext,
+    ) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, None::<&Path>, cx).await;
+        let (panel, mut vcx) = setup_panel_with_project(project.clone(), cx);
+        crate::test_support::open_thread_with_connection(
+            &panel,
+            StubAgentConnection::new(),
+            &mut vcx,
+        );
+        let previous_id = crate::test_support::active_thread_id(&panel, &vcx);
+        let previous_session = crate::test_support::active_session_id(&panel, &vcx);
+        // New Chat seeds unarchived metadata before loading the session.
+        vcx.update(|_, cx| {
+            ThreadMetadataStore::global(cx)
+                .update(cx, |store, cx| store.unarchive(previous_id, cx));
+        });
+        let thread = panel.read_with(&vcx, |panel, cx| panel.active_agent_thread(cx).unwrap());
+        thread.update_in(&mut vcx, |thread, _, cx| {
+            thread.push_user_content_block(None, "Remember this conversation".into(), cx);
+            thread
+                .set_title("Previous conversation".into(), cx)
+                .detach();
+        });
+        vcx.run_until_parked();
+        crate::test_support::open_thread_with_connection(
+            &panel,
+            StubAgentConnection::new(),
+            &mut vcx,
+        );
+        let new_id = crate::test_support::active_thread_id(&panel, &vcx);
+        assert_ne!(previous_id, new_id);
+        let previous = vcx.update(|_, cx| {
+            let store = ThreadMetadataStore::global(cx).read(cx);
+            assert!(
+                store
+                    .entries_for_chat(project.read(cx), cx)
+                    .any(|metadata| metadata.thread_id == previous_id),
+                "The previous scratch conversation must remain in Chat history after New Chat"
+            );
+            store.entry(previous_id).unwrap().clone()
+        });
+        panel.update_in(&mut vcx, |panel, window, cx| {
+            panel.load_agent_thread(
+                crate::Agent::from(previous.agent_id.clone()),
+                previous.thread_id,
+                Some(previous.folder_paths().clone()),
+                previous.title(),
+                true,
+                crate::AgentThreadSource::Sidebar,
+                window,
+                cx,
+            );
+        });
+        vcx.run_until_parked();
+        assert_eq!(
+            crate::test_support::active_thread_id(&panel, &vcx),
+            previous_id
+        );
+        assert_eq!(
+            crate::test_support::active_session_id(&panel, &vcx),
+            previous_session,
+            "Selecting history must restore the previous conversation, not create a new session"
         );
     }
 

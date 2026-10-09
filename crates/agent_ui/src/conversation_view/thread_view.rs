@@ -565,6 +565,8 @@ impl PermissionSelection {
     }
 }
 
+pub(super) const CHAT_COMPOSER_LINES: usize = 3;
+
 pub struct ThreadView {
     pub(crate) root_thread_id: ThreadId,
     pub session_id: acp::SessionId,
@@ -4401,12 +4403,12 @@ impl ThreadView {
             editor.set_mode(
                 editor::EditorMode::AutoHeight {
                     min_lines: if enabled {
-                        2
+                        CHAT_COMPOSER_LINES
                     } else {
                         AgentSettings::get_global(cx).message_editor_min_lines
                     },
                     max_lines: Some(if enabled {
-                        8
+                        CHAT_COMPOSER_LINES
                     } else {
                         AgentSettings::get_global(cx).set_message_editor_max_lines()
                     }),
@@ -4454,14 +4456,14 @@ impl ThreadView {
                     min_lines: if enabled {
                         2
                     } else if self.full_page_chat {
-                        2
+                        CHAT_COMPOSER_LINES
                     } else {
                         AgentSettings::get_global(cx).message_editor_min_lines
                     },
                     max_lines: Some(if enabled {
                         6
                     } else if self.full_page_chat {
-                        8
+                        CHAT_COMPOSER_LINES
                     } else {
                         AgentSettings::get_global(cx).set_message_editor_max_lines()
                     }),
@@ -4519,7 +4521,11 @@ impl ThreadView {
             })
     }
 
-    fn render_chat_composer(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_chat_composer(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let focused = self
+            .message_editor
+            .focus_handle(cx)
+            .contains_focused(window, cx);
         let capabilities = self.session_capabilities.read();
         let supports_images = capabilities.supports_images();
         let supports_context = capabilities.supports_embedded_context();
@@ -4531,31 +4537,39 @@ impl ThreadView {
             .is_some_and(|panel| !panel.read(cx).terminal_selections(cx).is_empty());
         let circular = |child: AnyElement| {
             h_flex()
-                .size(px(48.))
+                .size(px(40.))
                 .flex_none()
                 .justify_center()
                 .rounded_full()
                 .border_1()
                 .border_color(gpui::rgba(0x82779930))
+                .hover(|style| {
+                    style
+                        .bg(gpui::rgb(0x1a2031))
+                        .border_color(gpui::rgba(0xa58bff66))
+                })
                 .child(child)
         };
         v_flex()
             .relative()
             .w_full()
             .flex_none()
-            .px_8()
-            .pb_8()
+            .items_center()
+            .px_6()
+            .pb_5()
             .pt_3()
             .on_action(cx.listener(Self::handle_message_editor_move_up))
             .child(
                 v_flex()
                     .w_full()
                     .min_w_0()
-                    .p_4()
-                    .gap_3()
+                    .max_w(px(1040.))
+                    .p_3()
+                    .gap_2()
                     .rounded_2xl()
+                    .shadow_lg()
                     .border_1()
-                    .border_color(gpui::rgba(0xa58bff99))
+                    .border_color(gpui::rgba(if focused { 0xa58bff99 } else { 0x8273b45a }))
                     .bg(gpui::rgb(0x111625))
                     .child(
                         div()
@@ -4569,7 +4583,10 @@ impl ThreadView {
                             .w_full()
                             .min_w_0()
                             .flex_wrap()
-                            .gap_3()
+                            .gap_2()
+                            .pt_2()
+                            .border_t_1()
+                            .border_color(gpui::rgba(0x82779920))
                             .justify_between()
                             .child(
                                 h_flex()
@@ -4579,8 +4596,9 @@ impl ThreadView {
                                     ))
                                     .child(circular(
                                         ButtonLike::new("chat-web-context")
+                                            .aria_label("Add a web page as context")
                                             .full_width()
-                                            .height(px(48.).into())
+                                            .height(px(40.).into())
                                             .style(ButtonStyle::Transparent)
                                             .disabled(!supports_context)
                                             .tooltip(Tooltip::text(
@@ -4605,8 +4623,9 @@ impl ThreadView {
                                     ))
                                     .child(circular(
                                         ButtonLike::new("chat-image-context")
+                                            .aria_label("Attach images")
                                             .full_width()
-                                            .height(px(48.).into())
+                                            .height(px(40.).into())
                                             .style(ButtonStyle::Transparent)
                                             .disabled(!supports_images)
                                             .tooltip(Tooltip::text("Attach images"))
@@ -4626,8 +4645,9 @@ impl ThreadView {
                                     ))
                                     .child(circular(
                                         ButtonLike::new("chat-terminal-context")
+                                            .aria_label("Attach selected terminal output")
                                             .full_width()
-                                            .height(px(48.).into())
+                                            .height(px(40.).into())
                                             .style(ButtonStyle::Transparent)
                                             .disabled(!supports_context || !has_terminal_selection)
                                             .tooltip(Tooltip::text(
@@ -4650,7 +4670,7 @@ impl ThreadView {
                                 h_flex()
                                     .min_w_0()
                                     .flex_wrap()
-                                    .gap_3()
+                                    .gap_2()
                                     .map(|controls| match self.config_options_view.clone() {
                                         Some(config) => controls.child(config),
                                         None => controls
@@ -4697,7 +4717,7 @@ impl ThreadView {
             IconName::ArrowUp
         };
         let build = self.build_presentation;
-        let size = 52.;
+        let size = if build { 52. } else { 44. };
         div()
             .size(px(size))
             .flex_none()
@@ -4751,7 +4771,7 @@ impl ThreadView {
         }
 
         if self.full_page_chat {
-            return self.render_chat_composer(cx);
+            return self.render_chat_composer(window, cx);
         }
         if self.build_presentation {
             return self.render_build_composer(cx);
@@ -5902,7 +5922,7 @@ impl ThreadView {
         PopoverMenu::new("add-context-menu")
             .trigger_with_tooltip(
                 IconButton::new("add-context", IconName::Plus)
-                    .size(if self.full_page_chat || self.build_presentation {
+                    .size(if self.build_presentation {
                         ButtonSize::Large
                     } else {
                         ButtonSize::Default
@@ -7708,7 +7728,19 @@ impl ThreadView {
             self.editor_expanded = false;
         }
 
-        let mode = if self.editor_expanded {
+        // Metadata/status updates call this too. Chat must never fall back to
+        // the expanding/empty-state Full editor after typing or sending.
+        let mode = if self.full_page_chat {
+            EditorMode::AutoHeight {
+                min_lines: CHAT_COMPOSER_LINES,
+                max_lines: Some(CHAT_COMPOSER_LINES),
+            }
+        } else if self.build_presentation {
+            EditorMode::AutoHeight {
+                min_lines: 2,
+                max_lines: Some(6),
+            }
+        } else if self.editor_expanded {
             EditorMode::Full {
                 scale_ui_elements_with_buffer_font_size: false,
                 show_active_line_background: false,

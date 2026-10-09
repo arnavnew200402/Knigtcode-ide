@@ -5880,6 +5880,72 @@ pub(crate) mod tests {
         );
     }
 
+    #[gpui::test(iterations = 5)]
+    async fn test_full_page_chat_composer_stays_fixed_for_long_drafts_and_thread_updates(
+        cx: &mut TestAppContext,
+    ) {
+        init_test(cx);
+        let (conversation, cx) =
+            setup_conversation_view(StubAgentServer::new(StubAgentConnection::new()), cx).await;
+        conversation.update_in(cx, |conversation, window, cx| {
+            conversation.set_full_page_chat(true, window, cx)
+        });
+        let view = active_thread(&conversation, cx);
+        let composer = message_editor(&conversation, cx);
+        let editor = composer.update(cx, |composer, _| composer.editor().clone());
+        let expected_mode = EditorMode::AutoHeight {
+            min_lines: thread_view::CHAT_COMPOSER_LINES,
+            max_lines: Some(thread_view::CHAT_COMPOSER_LINES),
+        };
+        let text = (0..80)
+            .map(|line| format!("Line {line}: a long draft must scroll, not resize the composer."))
+            .collect::<Vec<_>>()
+            .join("\n");
+        composer.update_in(cx, |composer, window, cx| {
+            composer.set_text(&text, window, cx)
+        });
+        cx.run_until_parked();
+        // The generic empty-thread sizing used to overwrite Chat's bounded
+        // mode on updates, causing the entire box to grow while typing.
+        view.update(cx, |view, cx| view.sync_editor_mode(cx));
+        assert_eq!(
+            editor.read_with(cx, |editor, _| editor.mode().clone()),
+            expected_mode
+        );
+        assert_eq!(
+            composer.read_with(cx, |composer, cx| composer.text(cx)),
+            text
+        );
+        view.update_in(cx, |view, _, cx| {
+            view.thread.update(cx, |thread, cx| {
+                thread.push_user_content_block(None, "Earlier message".into(), cx)
+            });
+            view.sync_editor_mode(cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            editor.read_with(cx, |editor, _| editor.mode().clone()),
+            expected_mode
+        );
+        assert_eq!(
+            composer.read_with(cx, |composer, cx| composer.text(cx)),
+            text
+        );
+        conversation.update_in(cx, |conversation, window, cx| {
+            conversation.set_full_page_chat(false, window, cx)
+        });
+        view.update(cx, |view, cx| view.sync_editor_mode(cx));
+        editor.read_with(cx, |editor, cx| {
+            assert_eq!(
+                editor.mode(),
+                &EditorMode::AutoHeight {
+                    min_lines: AgentSettings::get_global(cx).message_editor_min_lines,
+                    max_lines: Some(AgentSettings::get_global(cx).set_message_editor_max_lines()),
+                }
+            );
+        });
+    }
+
     #[gpui::test]
     async fn test_full_page_chat_sends_and_receives_on_the_connected_session(
         cx: &mut TestAppContext,

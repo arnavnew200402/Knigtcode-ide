@@ -1588,6 +1588,7 @@ pub struct WorkbenchActivity {
 pub struct Workspace {
     weak_self: WeakEntity<Self>,
     knightcode_activities: Vec<WorkbenchActivity>,
+    knightcode_chat: bool,
     workspace_actions: Vec<Box<dyn Fn(Div, &Workspace, &mut Window, &mut Context<Self>) -> Div>>,
     zoomed: Option<AnyWeakView>,
     previous_dock_drag_coordinates: Option<Point<Pixels>>,
@@ -2144,6 +2145,7 @@ impl Workspace {
             bounds: Default::default(),
             centered_layout: false,
             knightcode_activities: Vec::new(),
+            knightcode_chat: false,
             bounds_save_task_queued: None,
             on_prompt_for_new_path: None,
             on_prompt_for_open_path: None,
@@ -2468,6 +2470,15 @@ impl Workspace {
     ) {
         self.knightcode_activities = activities;
         cx.notify();
+    }
+
+    /// Chat is a front page, not an editor workbench. This is presentation
+    /// state only; the user's persisted status-bar preference is unchanged.
+    pub fn set_knightcode_chat(&mut self, enabled: bool, cx: &mut App) {
+        if self.knightcode_chat != enabled {
+            self.knightcode_chat = enabled;
+            cx.notify(self.weak_self.entity_id());
+        }
     }
 
     pub fn is_knightcode_build(&self) -> bool {
@@ -2975,7 +2986,7 @@ impl Workspace {
     }
 
     pub fn status_bar_visible(&self, cx: &App) -> bool {
-        StatusBarSettings::get_global(cx).show
+        !self.knightcode_chat && StatusBarSettings::get_global(cx).show
     }
 
     pub fn multi_workspace(&self) -> Option<&WeakEntity<MultiWorkspace>> {
@@ -10094,7 +10105,9 @@ impl Render for Workspace {
                                     .inset_0()
                                     .shadow_lg();
 
-                                if !WorkspaceSettings::get_global(cx).zoomed_padding {
+                                if self.knightcode_chat
+                                    || !WorkspaceSettings::get_global(cx).zoomed_padding
+                                {
                                     return Some(div);
                                 }
 
@@ -18860,6 +18873,44 @@ mod tests {
         workspace.read_with(cx, |workspace, cx| {
             let visible = workspace.status_bar_visible(cx);
             assert!(visible, "Status bar should be visible when show is true");
+        });
+    }
+
+    #[gpui::test]
+    async fn test_chat_status_bar_visibility_preserves_build_settings(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, _cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        workspace.update(cx, |workspace, cx| {
+            assert!(workspace.status_bar_visible(cx));
+            workspace.set_knightcode_chat(true, cx);
+            assert!(!workspace.status_bar_visible(cx));
+            assert!(
+                StatusBarSettings::get_global(cx).show,
+                "Chat must not change user settings"
+            );
+            workspace.set_knightcode_chat(false, cx);
+            assert!(
+                workspace.status_bar_visible(cx),
+                "Build must restore the status bar"
+            );
+        });
+        cx.update_global(|store: &mut SettingsStore, cx| {
+            store.update_user_settings(cx, |settings| {
+                settings.status_bar.get_or_insert_default().show = Some(false);
+            });
+        });
+        workspace.update(cx, |workspace, cx| {
+            workspace.set_knightcode_chat(true, cx);
+            assert!(!workspace.status_bar_visible(cx));
+            workspace.set_knightcode_chat(false, cx);
+            assert!(
+                !workspace.status_bar_visible(cx),
+                "Build must respect a hidden status bar preference"
+            );
         });
     }
 

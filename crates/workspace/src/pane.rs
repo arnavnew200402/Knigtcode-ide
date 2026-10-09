@@ -419,7 +419,7 @@ pub struct Pane {
     can_split_predicate:
         Option<Arc<dyn Fn(&mut Self, &dyn Any, &mut Window, &mut Context<Self>) -> bool>>,
     can_toggle_zoom: bool,
-    should_display_tab_bar: Rc<dyn Fn(&Window, &mut Context<Pane>) -> bool>,
+    should_display_tab_bar: Rc<dyn Fn(&Pane, &Window, &mut Context<Pane>) -> bool>,
     should_display_welcome_page: bool,
     render_tab_bar_buttons: Rc<
         dyn Fn(
@@ -604,7 +604,7 @@ impl Pane {
             can_drop_predicate,
             can_split_predicate: None,
             can_toggle_zoom: true,
-            should_display_tab_bar: Rc::new(|_, cx| TabBarSettings::get_global(cx).show),
+            should_display_tab_bar: Rc::new(|_, _, cx| TabBarSettings::get_global(cx).show),
             should_display_welcome_page: false,
             render_tab_bar_buttons: Rc::new(default_render_tab_bar_buttons),
             render_tab_bar: Rc::new(Self::render_tab_bar),
@@ -831,6 +831,16 @@ impl Pane {
     pub fn set_should_display_tab_bar<F>(&mut self, should_display_tab_bar: F)
     where
         F: 'static + Fn(&Window, &mut Context<Pane>) -> bool,
+    {
+        self.should_display_tab_bar =
+            Rc::new(move |_, window, cx| should_display_tab_bar(window, cx));
+    }
+
+    /// Inspect the pane directly while rendering rather than re-reading its
+    /// entity through the context (which would reentrantly borrow the pane).
+    pub fn set_should_display_tab_bar_with_pane<F>(&mut self, should_display_tab_bar: F)
+    where
+        F: 'static + Fn(&Pane, &Window, &mut Context<Pane>) -> bool,
     {
         self.should_display_tab_bar = Rc::new(should_display_tab_bar);
     }
@@ -4419,7 +4429,7 @@ impl Render for Pane {
             .contribute_context(&mut key_context, cx);
 
         let should_display_tab_bar = self.should_display_tab_bar.clone();
-        let display_tab_bar = should_display_tab_bar(window, cx);
+        let display_tab_bar = should_display_tab_bar(self, window, cx);
         let Some(project) = self.project.upgrade() else {
             return div().track_focus(&self.focus_handle(cx));
         };
@@ -5153,6 +5163,44 @@ mod tests {
             }
             is_dragged_tab
         }
+    }
+
+    #[gpui::test]
+    async fn test_chat_tab_bar_predicate_reads_current_pane_and_preserves_legacy_api(
+        cx: &mut TestAppContext,
+    ) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, None, cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+        pane.update_in(cx, |pane, window, cx| {
+            pane.set_should_display_tab_bar_with_pane(|pane, _, _| {
+                pane.active_item()
+                    .is_some_and(|item| item.downcast::<TestItem>().is_some())
+            });
+            let predicate = pane.should_display_tab_bar.clone();
+            assert!(
+                !predicate(pane, window, cx),
+                "Empty welcome panes are tabless"
+            );
+        });
+        add_labeled_item(&pane, "file", false, cx);
+        pane.update_in(cx, |pane, window, cx| {
+            let predicate = pane.should_display_tab_bar.clone();
+            assert!(
+                predicate(pane, window, cx),
+                "Opening a file must restore normal tabs"
+            );
+            // Existing users of the original Window/Context API keep working.
+            pane.set_should_display_tab_bar(|_, _| false);
+            let predicate = pane.should_display_tab_bar.clone();
+            assert!(!predicate(pane, window, cx));
+            pane.set_should_display_tab_bar(|_, _| true);
+            let predicate = pane.should_display_tab_bar.clone();
+            assert!(predicate(pane, window, cx));
+        });
     }
 
     #[gpui::test]
