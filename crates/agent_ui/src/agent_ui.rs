@@ -5,6 +5,7 @@ mod agent_model_selector;
 mod agent_panel;
 mod agent_registry_ui;
 mod buffer_codegen;
+mod build_artwork;
 mod completion_provider;
 mod config_options;
 mod context;
@@ -351,6 +352,8 @@ actions!(
         ResetFastModeWarnings,
         /// Opens the "Add Context" menu in the message editor.
         OpenAddContextMenu,
+        /// Opens the connected KnightCode task/subagent controls.
+        OpenTaskPanel,
         /// Interrupts the current generation and sends the message immediately.
         SendImmediately,
         /// Sends the next queued message immediately.

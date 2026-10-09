@@ -208,6 +208,7 @@ pub struct MessageEditor {
     agent_id: AgentId,
     thread_store: Option<Entity<ThreadStore>>,
     full_page_chat: bool,
+    build_presentation: bool,
     _subscriptions: Vec<Subscription>,
     _parse_slash_command_task: Task<()>,
 }
@@ -611,6 +612,7 @@ impl MessageEditor {
             agent_id,
             thread_store,
             full_page_chat: false,
+            build_presentation: false,
             _subscriptions: subscriptions,
             _parse_slash_command_task: Task::ready(()),
         }
@@ -2007,7 +2009,22 @@ impl MessageEditor {
     ) {
         self.full_page_chat = enabled;
         if enabled {
+            self.build_presentation = false;
             self.set_placeholder_text("Ask anything…", window, cx);
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn set_build_presentation(
+        &mut self,
+        enabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.build_presentation = enabled;
+        if enabled {
+            self.full_page_chat = false;
+            self.set_placeholder_text("Ask KnightCode anything...", window, cx);
         }
         cx.notify();
     }
@@ -2020,6 +2037,8 @@ impl MessageEditor {
     ) {
         let placeholder = if self.full_page_chat {
             "Ask anything…"
+        } else if self.build_presentation {
+            "Ask KnightCode anything..."
         } else {
             placeholder
         };
@@ -2149,14 +2168,14 @@ impl Render for MessageEditor {
                     } else {
                         cx.theme().colors().text
                     },
-                    font_family: if self.full_page_chat {
+                    font_family: if self.full_page_chat || self.build_presentation {
                         settings.agent_ui_font_family().clone()
                     } else {
                         settings.agent_buffer_font_family().clone()
                     },
                     font_fallbacks: settings.buffer_font.fallbacks.clone(),
                     font_features: settings.buffer_font.features.clone(),
-                    font_size: if self.full_page_chat {
+                    font_size: if self.full_page_chat || self.build_presentation {
                         settings.agent_ui_font_size(cx).into()
                     } else {
                         settings.agent_buffer_font_size(cx).into()
@@ -2171,6 +2190,8 @@ impl Render for MessageEditor {
                     EditorStyle {
                         background: if self.full_page_chat {
                             gpui::rgb(0x111625).into()
+                        } else if self.build_presentation {
+                            gpui::rgb(0x141009).into()
                         } else {
                             cx.theme().colors().editor_background
                         },

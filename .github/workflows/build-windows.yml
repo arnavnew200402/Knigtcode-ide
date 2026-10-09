@@ -7,12 +7,18 @@ on:
         description: Run native Chat session/draft regression tests
         type: boolean
         default: true
+      run_build_tests:
+        description: Run native Build/Chat continuity and connected-send regression tests
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-windows-${{ github.ref }}
+  # Finish verification of older commits instead of cancelling a long release
+  # build whenever a newer UI change is dispatched. Duplicate SHA runs still cancel.
+  group: build-windows-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
 env:
@@ -96,6 +102,17 @@ jobs:
           components: rustfmt, clippy, rust-analyzer, rust-src
           targets: wasm32-wasip2, wasm32-unknown-unknown, x86_64-unknown-linux-musl
 
+      - name: Check native workbench sources and artwork
+        shell: pwsh
+        run: |
+          node script/check-build-workbench.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Native Build source/artwork validation failed.' }
+          rustfmt --edition 2024 --check `
+            crates/knightcode_onboarding/src/build_layout.rs `
+            crates/knightcode_onboarding/src/build_welcome.rs `
+            crates/agent_ui/src/conversation_view/thread_view/build_presentation.rs
+          if ($LASTEXITCODE -ne 0) { throw 'Native Build formatting failed.' }
+
       - name: Cache Cargo dependencies and build output
         uses: Swatinem/rust-cache@v2
         with:
@@ -152,6 +169,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw 'Native Chat regression tests failed.'
           }
+
+      - name: Test native Build session and draft continuity
+        if: ${{ inputs.run_build_tests }}
+        shell: pwsh
+        timeout-minutes: 120
+        env:
+          ZED_HEADLESS: "1"
+          ZED_BUNDLE: "true"
+          GGML_NATIVE: "OFF"
+          PENDING_TRACES: "1"
+        run: |
+          cargo --config .cargo/bundle-config.toml test --release `
+            --package agent_ui --features audio --lib --jobs 2 `
+            --target x86_64-pc-windows-msvc test_build_workbench -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Native Build regression tests failed.' }
 
       - name: Upload the Windows installer and executable
         uses: actions/upload-artifact@v4

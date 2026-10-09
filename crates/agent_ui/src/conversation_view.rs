@@ -619,6 +619,7 @@ pub struct ConversationView {
     auth_task: Option<Task<()>>,
     loading_status: Option<SharedString>,
     full_page_chat: bool,
+    build_presentation: bool,
     /// When settings change, use this to see if the theme has changed (which
     /// causes mermaid diagrams to re-render).
     last_theme_id: Option<String>,
@@ -639,6 +640,9 @@ impl ConversationView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if enabled {
+            self.set_build_presentation(false, window, cx);
+        }
         if self.full_page_chat == enabled {
             return;
         }
@@ -646,6 +650,29 @@ impl ConversationView {
         if let Some(connected) = self.as_connected() {
             for view in connected.threads.values() {
                 view.update(cx, |view, cx| view.set_full_page_chat(enabled, window, cx));
+            }
+        }
+        cx.notify();
+    }
+
+    pub fn set_build_presentation(
+        &mut self,
+        enabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if enabled {
+            self.set_full_page_chat(false, window, cx);
+        }
+        if self.build_presentation == enabled {
+            return;
+        }
+        self.build_presentation = enabled;
+        if let Some(connected) = self.as_connected() {
+            for view in connected.threads.values() {
+                view.update(cx, |view, cx| {
+                    view.set_build_presentation(enabled, window, cx)
+                });
             }
         }
         cx.notify();
@@ -1025,6 +1052,7 @@ impl ConversationView {
             auth_task: None,
             loading_status: None,
             full_page_chat: false,
+            build_presentation: false,
             last_theme_id: Some(cx.theme().id.clone()),
             draft_prompt_persist_task: None,
             code_span_resolver,
@@ -1550,6 +1578,7 @@ impl ConversationView {
 
         let weak = cx.weak_entity();
         let full_page_chat = self.full_page_chat;
+        let build_presentation = self.build_presentation;
         let view = cx.new(|cx| {
             ThreadView::new(
                 self.thread_id,
@@ -1579,7 +1608,8 @@ impl ConversationView {
             )
         });
         view.update(cx, |view, cx| {
-            view.set_full_page_chat(full_page_chat, window, cx)
+            view.set_full_page_chat(full_page_chat, window, cx);
+            view.set_build_presentation(build_presentation, window, cx);
         });
         view
     }
@@ -5869,6 +5899,101 @@ pub(crate) mod tests {
         let session_id = view.read_with(cx, |view, _| view.session_id.clone());
         message_editor(&conversation, cx).update_in(cx, |editor, window, cx| {
             editor.set_text("Hello", window, cx);
+        });
+        view.update_in(cx, |view, window, cx| view.send(window, cx));
+        cx.run_until_parked();
+        view.read_with(cx, |view, cx| {
+            assert_eq!(view.session_id, session_id);
+            assert_eq!(view.thread.read(cx).entries().len(), 2);
+            assert_eq!(view.thread.read(cx).status(), ThreadStatus::Idle);
+            assert!(view.message_editor.read(cx).is_empty(cx));
+        });
+    }
+
+    #[gpui::test(iterations = 5)]
+    async fn test_build_workbench_preserves_session_and_draft_across_chat(cx: &mut TestAppContext) {
+        init_test(cx);
+        let connection = StubAgentConnection::new().with_agent_id(agent::ZED_AGENT_ID.clone());
+        let (conversation, cx) =
+            setup_conversation_view(StubAgentServer::new(connection), cx).await;
+        let view = active_thread(&conversation, cx);
+        let session_id = view.read_with(cx, |view, _| view.session_id.clone());
+        let composer = message_editor(&conversation, cx);
+        let editor = composer.update(cx, |composer, _| composer.editor().clone());
+        let original_placeholder = editor.update(cx, |editor, cx| editor.placeholder_text(cx));
+        composer.update_in(cx, |composer, window, cx| {
+            composer.set_text("Keep my Build draft", window, cx)
+        });
+        conversation.update_in(cx, |conversation, window, cx| {
+            conversation.set_build_presentation(true, window, cx);
+            conversation.set_build_presentation(true, window, cx);
+        });
+        assert_eq!(
+            editor.update(cx, |editor, cx| editor.placeholder_text(cx)),
+            Some("Ask KnightCode anything...".into())
+        );
+        conversation.update_in(cx, |conversation, window, cx| {
+            conversation.set_full_page_chat(true, window, cx)
+        });
+        conversation.read_with(cx, |conversation, _| {
+            assert!(conversation.full_page_chat);
+            assert!(!conversation.build_presentation);
+        });
+        assert_eq!(
+            editor.update(cx, |editor, cx| editor.placeholder_text(cx)),
+            Some("Ask anything…".into())
+        );
+        conversation.update_in(cx, |conversation, window, cx| {
+            conversation.set_build_presentation(true, window, cx)
+        });
+        conversation.read_with(cx, |conversation, _| {
+            assert!(!conversation.full_page_chat);
+            assert!(conversation.build_presentation);
+        });
+        assert_eq!(
+            active_thread(&conversation, cx).entity_id(),
+            view.entity_id()
+        );
+        assert_eq!(
+            view.read_with(cx, |view, _| view.session_id.clone()),
+            session_id
+        );
+        assert_eq!(
+            composer.read_with(cx, |composer, cx| composer.text(cx)),
+            "Keep my Build draft"
+        );
+        conversation.update_in(cx, |conversation, window, cx| {
+            conversation.set_build_presentation(false, window, cx)
+        });
+        assert_eq!(
+            editor.update(cx, |editor, cx| editor.placeholder_text(cx)),
+            original_placeholder
+        );
+        assert_eq!(
+            composer.read_with(cx, |composer, cx| composer.text(cx)),
+            "Keep my Build draft"
+        );
+    }
+
+    #[gpui::test(iterations = 5)]
+    async fn test_build_workbench_sends_and_receives_on_the_connected_session(
+        cx: &mut TestAppContext,
+    ) {
+        init_test(cx);
+        let connection = StubAgentConnection::new().with_agent_id(agent::ZED_AGENT_ID.clone());
+        connection.set_next_prompt_updates(vec![acp::SessionUpdate::AgentMessageChunk(
+            acp::ContentChunk::new("Connected Build response".into()),
+        )]);
+        let (conversation, cx) =
+            setup_conversation_view(StubAgentServer::new(connection), cx).await;
+        add_to_workspace(conversation.clone(), cx);
+        conversation.update_in(cx, |conversation, window, cx| {
+            conversation.set_build_presentation(true, window, cx)
+        });
+        let view = active_thread(&conversation, cx);
+        let session_id = view.read_with(cx, |view, _| view.session_id.clone());
+        message_editor(&conversation, cx).update_in(cx, |editor, window, cx| {
+            editor.set_text("Build a feature", window, cx)
         });
         view.update_in(cx, |view, window, cx| view.send(window, cx));
         cx.run_until_parked();

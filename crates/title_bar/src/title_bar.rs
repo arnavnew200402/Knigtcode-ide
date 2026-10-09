@@ -234,6 +234,7 @@ fn set_window_layout(layout: WindowLayout, cx: &App) {
 pub struct TitleBar {
     platform_titlebar: Entity<PlatformTitleBar>,
     brand_icon: Arc<Image>,
+    build_brand_icon: Arc<Image>,
     project: Entity<Project>,
     user_store: Entity<UserStore>,
     client: Arc<Client>,
@@ -266,8 +267,21 @@ impl Render for TitleBar {
         }
 
         let chat = self.knightcode_mode == KnightCodeMode::Chat;
-        self.platform_titlebar
-            .update(cx, |bar, cx| bar.set_knightcode_chat(chat, cx));
+        let build = self.knightcode_mode == KnightCodeMode::Build;
+        self.platform_titlebar.update(cx, |bar, cx| {
+            bar.set_knightcode_chat(chat, cx);
+            bar.set_knightcode_build(build, cx);
+        });
+        if let Some(menu) = &self.application_menu {
+            let wide = f32::from(window.viewport_size().width) >= 1200.;
+            menu.update(cx, |menu, cx| menu.set_workbench_menus(build && wide, cx));
+        }
+        if build {
+            let controls = self.render_build_title_bar(window, cx).into_any_element();
+            self.platform_titlebar
+                .update(cx, |bar, _| bar.set_children([controls]));
+            return self.platform_titlebar.clone().into_any_element();
+        }
         if chat {
             let controls = self.render_chat_title_bar(cx).into_any_element();
             self.platform_titlebar
@@ -618,6 +632,10 @@ impl TitleBar {
                 ImageFormat::Png,
                 include_bytes!("../../zed/resources/app-icon.png").to_vec(),
             )),
+            build_brand_icon: Arc::new(Image::from_bytes(
+                ImageFormat::Png,
+                include_bytes!("../../agent_ui/assets/build-agent-knight.png").to_vec(),
+            )),
             application_menu,
             workspace: workspace.weak_handle(),
             multi_workspace,
@@ -655,6 +673,157 @@ impl TitleBar {
         self.knightcode_operation = operation;
         self.knightcode_operation_busy = busy;
         cx.notify();
+    }
+
+    fn render_build_title_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let compact = f32::from(window.viewport_size().width) < 1200. || cx.accessible_mode();
+        h_flex()
+            .w_full()
+            .h_full()
+            .relative()
+            .justify_between()
+            .child(
+                h_flex()
+                    .h_full()
+                    .min_w_0()
+                    .gap_3()
+                    .child(
+                        ButtonLike::new("build-home")
+                            .height(px(50.).into())
+                            .style(ButtonStyle::Transparent)
+                            .aria_label("Go to KnightCode Home")
+                            .tooltip(Tooltip::text(
+                                "Home · switch to Chat or open another project",
+                            ))
+                            .child(
+                                h_flex()
+                                    .gap_3()
+                                    .child(img(self.build_brand_icon.clone()).w(px(28.)).h(px(34.)))
+                                    .child(
+                                        div()
+                                            .text_size(px(22.))
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .text_color(gpui::rgb(0xf5f0e9))
+                                            .child("KnightCode"),
+                                    ),
+                            )
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(ShowHome.boxed_clone(), cx)
+                            }),
+                    )
+                    .children(self.application_menu.clone())
+                    .children(self.render_restricted_mode(cx)),
+            )
+            .child(
+                h_flex()
+                    .h_full()
+                    .gap_4()
+                    .pr_6()
+                    .when(compact, |row| {
+                        row.child(
+                            IconButton::new("build-compact-search", IconName::MagnifyingGlass)
+                                .tooltip(Tooltip::text(
+                                    "Search files, symbols, commands, or ask KnightCode",
+                                ))
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(
+                                        zed_actions::command_palette::Toggle.boxed_clone(),
+                                        cx,
+                                    )
+                                }),
+                        )
+                    })
+                    .child(
+                        IconButton::new("build-settings", IconName::Settings)
+                            .icon_size(IconSize::Medium)
+                            .tooltip(Tooltip::for_action_title(
+                                "Settings",
+                                &zed_actions::OpenSettings,
+                            ))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(zed_actions::OpenSettings.boxed_clone(), cx)
+                            }),
+                    ),
+            )
+            .when(!compact, |bar| {
+                bar.child(
+                    div()
+                        .absolute()
+                        .left(relative(0.5))
+                        .ml(px(-154.))
+                        .w(px(438.))
+                        .rounded_lg()
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(gpui::rgb(0x64360e))
+                        .bg(gpui::linear_gradient(
+                            120.,
+                            gpui::linear_color_stop(gpui::rgb(0x0d0905), 0.),
+                            gpui::linear_color_stop(gpui::rgb(0x35200d), 1.),
+                        ))
+                        .child(
+                            PopoverMenu::new("build-global-search")
+                                .trigger_with_tooltip(
+                                    ButtonLike::new("build-search-files-and-symbols")
+                                        .full_width()
+                                        .height(px(40.).into())
+                                        .style(ButtonStyle::Transparent)
+                                        .aria_label("Search files, symbols, or ask KnightCode")
+                                        .child(
+                                            h_flex()
+                                                .w_full()
+                                                .px_3()
+                                                .gap_2()
+                                                .child(
+                                                    Icon::new(IconName::MagnifyingGlass)
+                                                        .size(IconSize::Small)
+                                                        .color(Color::Custom(
+                                                            gpui::rgb(0xff9b28).into(),
+                                                        )),
+                                                )
+                                                .child(
+                                                    Label::new(
+                                                        "Search files, symbols, or ask KnightCode…",
+                                                    )
+                                                    .size(LabelSize::Small)
+                                                    .color(Color::Custom(
+                                                        gpui::rgb(0xc7bcab).into(),
+                                                    )),
+                                                )
+                                                .child(div().flex_1())
+                                                .child(ui::KeyBinding::for_action(
+                                                    &zed_actions::command_palette::Toggle,
+                                                    cx,
+                                                )),
+                                        ),
+                                    Tooltip::text(
+                                        "Files, symbols, commands and the connected coding agent",
+                                    ),
+                                )
+                                .menu(|window, cx| {
+                                    Some(ContextMenu::build(window, cx, |menu, _, _| {
+                                        menu.action(
+                                            "Search Files",
+                                            workspace::ToggleFileFinder::default().boxed_clone(),
+                                        )
+                                        .action(
+                                            "Search Symbols",
+                                            workspace::ToggleProjectSymbols.boxed_clone(),
+                                        )
+                                        .action(
+                                            "Search Commands",
+                                            zed_actions::command_palette::Toggle.boxed_clone(),
+                                        )
+                                        .action(
+                                            "Ask KnightCode",
+                                            zed_actions::assistant::FocusAgent.boxed_clone(),
+                                        )
+                                        .action("Open Chat", ShowChat.boxed_clone())
+                                    }))
+                                }),
+                        ),
+                )
+            })
     }
 
     fn render_chat_title_bar(&self, _cx: &mut Context<Self>) -> impl IntoElement {

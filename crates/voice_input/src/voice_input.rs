@@ -335,6 +335,7 @@ fn transcribe(model: &SpeechModel, samples: &[f32], cancelled: Arc<AtomicBool>) 
 pub struct VoiceInput {
     status: VoiceStatus,
     compact: bool,
+    copper: bool,
     capture: Option<MicrophoneCapture>,
     cancelled: Arc<AtomicBool>,
     generation: u64,
@@ -353,6 +354,7 @@ impl VoiceInput {
         Self {
             status: VoiceStatus::Idle,
             compact: false,
+            copper: false,
             capture: None,
             cancelled: Arc::new(AtomicBool::new(false)),
             generation: 0,
@@ -370,6 +372,13 @@ impl VoiceInput {
     pub fn set_compact(&mut self, compact: bool, cx: &mut Context<Self>) {
         if self.compact != compact {
             self.compact = compact;
+            cx.notify();
+        }
+    }
+
+    pub fn set_copper(&mut self, copper: bool, cx: &mut Context<Self>) {
+        if self.copper != copper {
+            self.copper = copper;
             cx.notify();
         }
     }
@@ -513,11 +522,18 @@ impl Render for VoiceInput {
                         .rounded_full()
                         .border_1()
                         .border_color(gpui::rgba(0x8c83af30))
+                        .when(self.copper, |button| {
+                            button
+                                .w(px(54.))
+                                .h(px(52.))
+                                .rounded_lg()
+                                .border_color(gpui::rgba(0))
+                        })
                         .overflow_hidden()
                         .child(
                             ButtonLike::new("chat-voice-record")
                                 .full_width()
-                                .height(px(48.).into())
+                                .height(px(if self.copper { 52. } else { 48. }).into())
                                 .style(ButtonStyle::Transparent)
                                 .disabled(busy)
                                 .tooltip(Tooltip::text(label))
@@ -533,7 +549,14 @@ impl Render for VoiceInput {
                                         {
                                             Color::Error
                                         } else {
-                                            Color::Custom(gpui::rgb(0xbcb7da).into())
+                                            Color::Custom(
+                                                gpui::rgb(if self.copper {
+                                                    0xffd09b
+                                                } else {
+                                                    0xbcb7da
+                                                })
+                                                .into(),
+                                            )
                                         },
                                     ),
                                 )

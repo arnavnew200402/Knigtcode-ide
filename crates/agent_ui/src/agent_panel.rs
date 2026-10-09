@@ -1176,6 +1176,7 @@ pub struct AgentPanel {
     _extension_subscription: Option<Subscription>,
     _project_subscription: Subscription,
     zoomed: bool,
+    build_presentation: bool,
     pending_serialization: Option<Task<Result<()>>>,
     persist_selected_agent_task: Task<()>,
     new_user_onboarding: Entity<AgentPanelOnboarding>,
@@ -1590,6 +1591,7 @@ impl AgentPanel {
             _extension_subscription: extension_subscription,
             _project_subscription,
             zoomed: false,
+            build_presentation: false,
             pending_serialization: None,
             new_user_onboarding: onboarding,
             thread_store,
@@ -1607,6 +1609,24 @@ impl AgentPanel {
 
         panel.ensure_native_agent_connection(cx);
         panel
+    }
+
+    pub fn set_build_presentation(
+        &mut self,
+        enabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.build_presentation = enabled;
+        let mut conversations = self.retained_threads.values().cloned().collect::<Vec<_>>();
+        conversations.extend(self.draft_thread.clone());
+        conversations.extend(self.active_conversation_view().cloned());
+        for conversation in conversations {
+            conversation.update(cx, |conversation, cx| {
+                conversation.set_build_presentation(enabled, window, cx)
+            });
+        }
+        cx.notify();
     }
 
     pub fn toggle_focus(
@@ -4289,6 +4309,9 @@ impl AgentPanel {
         self.retain_running_thread(old_view, cx);
 
         if let BaseView::AgentThread { conversation_view } = &self.base_view {
+            conversation_view.update(cx, |view, cx| {
+                view.set_build_presentation(self.build_presentation, window, cx)
+            });
             let conversation_view = conversation_view.read(cx);
             let thread_agent = conversation_view.agent_key().clone();
             if self.selected_agent != thread_agent {
@@ -6150,6 +6173,68 @@ impl AgentPanel {
             .active_conversation_view()
             .map(|thread| thread.read(cx).is_loading())
             .unwrap_or(false);
+
+        if self.build_presentation {
+            return h_flex()
+                .id("agent-panel-toolbar")
+                .w_full()
+                .h(px(80.))
+                .px_4()
+                .gap_4()
+                .when(self.active_thread_has_messages(cx), |bar| {
+                    bar.child(self.render_title_view(window, cx))
+                })
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .w(px(46.))
+                        .h(px(44.))
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(gpui::rgb(0xb56d1d))
+                        .bg(gpui::rgb(0x211306))
+                        .child(
+                            PopoverMenu::new("new_thread_menu")
+                                .with_handle(self.new_thread_menu_handle.clone())
+                                .trigger_with_tooltip(
+                                    ui::ButtonLike::new("new_thread_menu_btn")
+                                        .full_width()
+                                        .height(px(44.).into())
+                                        .style(ButtonStyle::Transparent)
+                                        .disabled(!can_create_entries)
+                                        .aria_label("New conversation or agent")
+                                        .child(
+                                            Icon::new(IconName::Plus)
+                                                .size(IconSize::Medium)
+                                                .color(Color::Custom(gpui::rgb(0xffc06c).into())),
+                                        ),
+                                    Tooltip::text("New conversation or agent"),
+                                )
+                                .menu(move |window, cx| new_thread_menu_builder(window, cx)),
+                        ),
+                )
+                .child(
+                    div()
+                        .w(px(46.))
+                        .h(px(44.))
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(gpui::rgb(0x5b564c))
+                        .bg(gpui::rgb(0x0d0c09))
+                        .child(
+                            ui::ButtonLike::new("build-agent-history")
+                                .full_width()
+                                .height(px(44.).into())
+                                .style(ButtonStyle::Transparent)
+                                .aria_label("Conversation history")
+                                .tooltip(Tooltip::text("Conversation history"))
+                                .child(Icon::new(IconName::Clock).size(IconSize::Medium))
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(ToggleWorkspaceSidebar.boxed_clone(), cx)
+                                }),
+                        ),
+                );
+        }
 
         let has_custom_icon = selected_agent_custom_icon.is_some();
         let selected_agent_builtin_icon = if showing_terminal {

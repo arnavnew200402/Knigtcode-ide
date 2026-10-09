@@ -291,18 +291,21 @@ impl TerminalPanel {
         }
         cx.notify();
         if self.active && self.has_no_terminals(cx) {
+            let reveal = if self
+                .workspace
+                .read_with(cx, |workspace, _| workspace.is_knightcode_build())
+                .unwrap_or(false)
+            {
+                RevealStrategy::Never
+            } else {
+                RevealStrategy::Always
+            };
             let working_directory = self
                 .workspace
                 .update(cx, |workspace, cx| default_working_directory(workspace, cx))
                 .ok()
                 .flatten();
-            Some(self.add_terminal_shell(
-                false,
-                working_directory,
-                RevealStrategy::Always,
-                window,
-                cx,
-            ))
+            Some(self.add_terminal_shell(false, working_directory, reveal, window, cx))
         } else {
             None
         }
@@ -730,6 +733,37 @@ impl TerminalPanel {
                 .unwrap_or_else(|e| Task::ready(Err(e))),
             RevealTarget::Dock => self.add_terminal_task(spawn_task, reveal, window, cx),
         }
+    }
+
+    /// Populate a new Build workbench with a real shell without duplicating a
+    /// running/restoring terminal. Uses the same cwd and spawn path as NewTerminal.
+    pub fn ensure_default_terminal(
+        workspace: &mut Workspace,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) {
+        let Some(panel) = workspace.panel::<Self>(cx) else {
+            return;
+        };
+        let state = panel.read(cx);
+        if state.restoring
+            || state.pending_terminals_to_add > 0
+            || state
+                .center
+                .panes()
+                .into_iter()
+                .any(|pane| pane.read(cx).items_len() > 0)
+        {
+            return;
+        }
+        let cwd = default_working_directory(workspace, cx);
+        panel
+            .update(cx, |panel, cx| {
+                // Populate the dock, not a focused center terminal; do not steal
+                // focus from a draft the user starts while the shell is spawning.
+                panel.add_terminal_shell(false, cwd, RevealStrategy::Never, window, cx)
+            })
+            .detach_and_log_err(cx);
     }
 
     /// Create a new Terminal in the current working directory or the user's home directory

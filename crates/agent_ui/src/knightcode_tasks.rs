@@ -65,6 +65,7 @@ pub struct KnightCodeTasks {
     tasks: BTreeMap<String, TaskSnapshot>,
     models: Vec<EngineModel>,
     expanded: bool,
+    build_presentation: bool,
     show_settings: bool,
     prompt: Entity<Editor>,
     profiles: Entity<Editor>,
@@ -161,6 +162,7 @@ impl KnightCodeTasks {
             tasks: BTreeMap::default(),
             models: Vec::new(),
             expanded: false,
+            build_presentation: false,
             show_settings: false,
             prompt,
             profiles,
@@ -197,8 +199,174 @@ impl KnightCodeTasks {
             .count()
     }
 
+    pub fn is_available(&self) -> bool {
+        self.available
+    }
+
+    pub fn open_task_panel(&mut self, cx: &mut Context<Self>) {
+        if self.available {
+            self.expanded = true;
+            cx.notify();
+        }
+    }
+
+    pub fn set_build_presentation(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.build_presentation = enabled;
+        cx.notify();
+    }
+
+    fn render_build_model_picker(&self, cx: &Context<Self>) -> impl IntoElement {
+        let label = match &self.selected_model {
+            TaskSelection::Value(reference) => self
+                .models
+                .iter()
+                .find(|model| &model.reference == reference)
+                .map(|model| model.name.clone())
+                .unwrap_or_else(|| reference.clone()),
+            TaskSelection::Parent => "Inherit parent model".into(),
+            TaskSelection::Default => "Agent default model".into(),
+        };
+        let models = self.models.clone();
+        let weak = cx.weak_entity();
+        PopoverMenu::new("build-subagent-model-picker")
+            .trigger_with_tooltip(
+                ui::ButtonLike::new("build-subagent-model")
+                    .full_width()
+                    .height(px(50.).into())
+                    .style(ButtonStyle::Transparent)
+                    .disabled(!self.available || !self.connected || self.models.is_empty())
+                    .aria_label("Model for the next subagent task")
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .px_2()
+                            .gap_2()
+                            .child(
+                                Icon::new(IconName::Sparkle)
+                                    .color(Color::Custom(gpui::rgb(0xffa63d).into())),
+                            )
+                            .child(Label::new(label).size(LabelSize::Small).truncate())
+                            .child(div().flex_1())
+                            .child(Icon::new(IconName::ChevronDown).size(IconSize::Small)),
+                    ),
+                ui::Tooltip::text("Model override for the next dispatched subagent task"),
+            )
+            .menu(move |window, cx| {
+                Some(ContextMenu::build(window, cx, |mut menu, _, _| {
+                    let default_weak = weak.clone();
+                    menu = menu.entry("Agent default model", None, move |_, cx| {
+                        default_weak
+                            .update(cx, |this, cx| {
+                                this.selected_model = TaskSelection::Default;
+                                cx.notify();
+                            })
+                            .log_err();
+                    });
+                    let parent_weak = weak.clone();
+                    menu = menu.entry("Inherit parent model", None, move |_, cx| {
+                        parent_weak
+                            .update(cx, |this, cx| {
+                                this.selected_model = TaskSelection::Parent;
+                                cx.notify();
+                            })
+                            .log_err();
+                    });
+                    for model in &models {
+                        let reference = model.reference.clone();
+                        let weak = weak.clone();
+                        menu = menu.entry(
+                            format!("{} ({})", model.name, model.provider_name),
+                            None,
+                            move |_, cx| {
+                                weak.update(cx, |this, cx| {
+                                    this.selected_model = TaskSelection::Value(reference.clone());
+                                    cx.notify();
+                                })
+                                .log_err();
+                            },
+                        );
+                    }
+                    menu
+                }))
+            })
+    }
+
     pub fn render_composer_controls(&self, cx: &Context<Self>) -> impl IntoElement {
         let enabled = self.config.as_ref().is_some_and(|config| config.enabled);
+        if self.build_presentation {
+            return h_flex()
+                .w_full()
+                .gap_2()
+                .flex_wrap()
+                .child(
+                    h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .h(px(50.))
+                        .px_2()
+                        .gap_2()
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(gpui::rgb(0x704214))
+                        .bg(gpui::rgb(0x171006))
+                        .child(
+                            Icon::new(IconName::BoltOutlined)
+                                .color(Color::Custom(gpui::rgb(0xffa536).into())),
+                        )
+                        .child(Label::new("Subagents").size(LabelSize::Small))
+                        .child(div().flex_1())
+                        .child(
+                            ui::Switch::new(
+                                "build-subagent-enabled",
+                                if enabled {
+                                    ui::ToggleState::Selected
+                                } else {
+                                    ui::ToggleState::Unselected
+                                },
+                            )
+                            .disabled(
+                                !self.available
+                                    || self.config.is_none()
+                                    || self.busy
+                                    || !self.connected,
+                            )
+                            .on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    if let Some(mut config) = this.config.clone() {
+                                        config.enabled = !config.enabled;
+                                        this.save_config(config, window, cx);
+                                    }
+                                },
+                            )),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .h(px(50.))
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(gpui::rgb(0x704214))
+                        .bg(gpui::rgb(0x171006))
+                        .child(self.render_build_model_picker(cx)),
+                )
+                .when(self.active_count() > 0, |row| {
+                    row.child(
+                        Button::new(
+                            "build-task-panel",
+                            format!("Tasks ({})", self.active_count()),
+                        )
+                        .label_size(LabelSize::Small)
+                        .toggle_state(self.expanded)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.expanded = !this.expanded;
+                            cx.notify();
+                        })),
+                    )
+                })
+                .into_any_element();
+        }
         h_flex()
             .gap_1()
             .child(
@@ -229,6 +397,7 @@ impl KnightCodeTasks {
                         cx.notify();
                     })),
             )
+            .into_any_element()
     }
 
     fn accept_task(&mut self, task: TaskSnapshot, cx: &mut Context<Self>) {

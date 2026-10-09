@@ -18,7 +18,7 @@ use knightcode_engine::session_controls::SessionMode;
 use knightcode_models::{LocalModelsView, ModelPicker, SignInView, State};
 use language_model::AuthenticateError;
 use remote::RemoteConnectionOptions;
-use settings::{DefaultOpenBehavior, Settings as _};
+use settings::{DefaultOpenBehavior, Settings as _, SettingsStore};
 use title_bar::{KnightCodeMode, ShowAccount, ShowBuild, ShowChat, ShowHome, ShowModels, TitleBar};
 use ui::{ButtonLike, Divider, TintColor, prelude::*, utils::WithRemSize};
 use util::ResultExt as _;
@@ -61,6 +61,7 @@ impl Page {
 }
 
 pub(super) fn init(cx: &mut App) {
+    super::build_layout::init(cx);
     cx.default_global::<WorkspaceModesRegistry>();
     cx.observe_new(|workspace: &mut Workspace, window, cx| {
         if let Some(window) = window {
@@ -160,10 +161,36 @@ fn install(
                 },
             )
         });
+        let layout_subscription = workspace_handle.upgrade().map(|workspace| {
+            cx.observe_in(
+                &workspace,
+                window,
+                |modes: &mut WorkspaceModes, workspace, window, cx| {
+                    if !workspace.read(cx).is_knightcode_build() {
+                        return;
+                    }
+                    let mask = super::build_layout::panel_mask(workspace.read(cx), cx);
+                    if mask != modes.last_build_panel_mask {
+                        modes.last_build_panel_mask = mask;
+                        let workspace = workspace.downgrade();
+                        cx.defer_in(window, move |modes, window, cx| {
+                            workspace
+                                .update(cx, |workspace, cx| {
+                                    if workspace.active_item_as::<KnightCodePage>(cx).is_none() {
+                                        modes.enable_workbench(workspace, window, cx);
+                                    }
+                                })
+                                .log_err();
+                        });
+                    }
+                },
+            )
+        });
         WorkspaceModes {
             workspace: workspace_handle.clone(),
             requested_mode: None,
             chat_page: None,
+            cached_pages: Vec::new(),
             panel: None,
             policy_task: None,
             policy_subscription: None,
@@ -172,6 +199,32 @@ fn install(
             build_pane: None,
             page_pane: None,
             pane_was_zoomed: false,
+            build_layout_initialized: false,
+            last_build_panel_mask: 0,
+            _layout_subscription: layout_subscription,
+            previous_build_theme: None,
+            build_theme_selection: None,
+            _theme_subscription: cx.observe_global::<SettingsStore>(
+                |modes: &mut WorkspaceModes, cx| {
+                    if modes.previous_build_theme.is_some()
+                        && modes.build_theme_selection.as_ref()
+                            == Some(&theme_settings::ThemeSettings::get_global(cx).theme)
+                        && modes
+                            .workspace
+                            .upgrade()
+                            .is_some_and(|workspace| workspace.read(cx).is_knightcode_build())
+                        && theme::GlobalTheme::theme(cx).name.as_ref() != "KnightCode Workbench"
+                        && let Ok(theme) =
+                            theme::ThemeRegistry::global(cx).get("KnightCode Workbench")
+                    {
+                        // Model/reasoning changes also update SettingsStore. Keep the
+                        // temporary workbench palette unless the user changes themes.
+                        let theme = theme_settings::ThemeSettings::get_global(cx)
+                            .apply_theme_overrides(theme);
+                        theme::GlobalTheme::update_theme(cx, theme);
+                    }
+                },
+            ),
             _subscription: subscription,
         }
     });
@@ -223,6 +276,25 @@ fn install(
             modes.update(cx, |modes, cx| modes.build(workspace, window, cx));
         }
     });
+    let initial_modes = modes.downgrade();
+    cx.defer_in(window, move |workspace, window, cx| {
+        if workspace.active_item_as::<KnightCodePage>(cx).is_none()
+            && workspace
+                .project()
+                .read(cx)
+                .visible_worktrees(cx)
+                .next()
+                .is_some()
+        {
+            initial_modes
+                .update(cx, |modes, cx| {
+                    if !modes.build_layout_initialized {
+                        modes.build_ready(workspace, window, cx);
+                    }
+                })
+                .log_err();
+        }
+    });
     modes
 }
 
@@ -230,6 +302,7 @@ struct WorkspaceModes {
     workspace: WeakEntity<Workspace>,
     requested_mode: Option<KnightCodeMode>,
     chat_page: Option<Entity<KnightCodePage>>,
+    cached_pages: Vec<Entity<KnightCodePage>>,
     panel: Option<Entity<AgentPanel>>,
     policy_task: Option<Task<()>>,
     policy_subscription: Option<Subscription>,
@@ -238,6 +311,12 @@ struct WorkspaceModes {
     build_pane: Option<WeakEntity<Pane>>,
     page_pane: Option<WeakEntity<Pane>>,
     pane_was_zoomed: bool,
+    build_layout_initialized: bool,
+    last_build_panel_mask: u8,
+    _layout_subscription: Option<Subscription>,
+    previous_build_theme: Option<Arc<theme::Theme>>,
+    build_theme_selection: Option<theme_settings::ThemeSelection>,
+    _theme_subscription: Subscription,
     _subscription: Option<Subscription>,
 }
 
@@ -382,6 +461,41 @@ impl WorkspaceModes {
         window: &mut Window,
         cx: &mut App,
     ) {
+        if let Some(previous) = self.previous_build_theme.take() {
+            // The workbench theme is temporary; never rewrite the user's
+            // persisted theme or undo a theme they selected while in Build.
+            if theme::GlobalTheme::theme(cx).name.as_ref() == "KnightCode Workbench"
+                && self.build_theme_selection.as_ref()
+                    == Some(&theme_settings::ThemeSettings::get_global(cx).theme)
+            {
+                theme::GlobalTheme::update_theme(cx, previous);
+                window.refresh();
+            }
+        }
+        self.build_theme_selection = None;
+        if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+            panel.update(cx, |panel, cx| {
+                panel.set_build_presentation(false, window, cx)
+            });
+        }
+        let workspace_handle = self.workspace.clone();
+        window.defer(cx, move |_, cx| {
+            workspace_handle
+                .update(cx, |workspace, cx| {
+                    if workspace.active_item_as::<KnightCodePage>(cx).is_some() {
+                        workspace.set_knightcode_workbench(Vec::new(), cx);
+                        if let Some(panel) = workspace.panel::<project_panel::ProjectPanel>(cx) {
+                            panel.update(cx, |_, cx| cx.notify());
+                        }
+                        if let Some(panel) =
+                            workspace.panel::<terminal_view::terminal_panel::TerminalPanel>(cx)
+                        {
+                            panel.update(cx, |_, cx| cx.notify());
+                        }
+                    }
+                })
+                .log_err();
+        });
         if self.build_docks.is_none() {
             self.build_docks = Some(workspace.capture_dock_state(window, cx));
             if let Some(item) = workspace
@@ -396,9 +510,19 @@ impl WorkspaceModes {
         }
         let existing = workspace
             .items_of_type::<KnightCodePage>(cx)
-            .find(|item| item.read(cx).page == page);
+            .find(|item| item.read(cx).page == page)
+            .or_else(|| {
+                self.cached_pages
+                    .iter()
+                    .find(|item| item.read(cx).page == page)
+                    .cloned()
+            });
         let item = if let Some(item) = existing {
-            workspace.activate_item(&item, true, true, window, cx);
+            if workspace.pane_for(&item).is_some() {
+                workspace.activate_item(&item, true, true, window, cx);
+            } else {
+                workspace.add_item_to_active_pane(Box::new(item.clone()), None, true, window, cx);
+            }
             item
         } else {
             let item = self
@@ -461,7 +585,12 @@ impl WorkspaceModes {
         }
         if let Some(pane) = self.page_pane.take().and_then(|pane| pane.upgrade()) {
             pane.update(cx, |pane, cx| {
-                pane.set_should_display_tab_bar(|_, _| true);
+                pane.set_should_display_tab_bar(|pane, _| {
+                    pane.active_item().is_some_and(|item| {
+                        item.downcast::<super::build_welcome::BuildWelcome>()
+                            .is_none()
+                    })
+                });
                 cx.notify();
                 pane.zoom_out(&ZoomOut, window, cx);
             });
@@ -489,23 +618,79 @@ impl WorkspaceModes {
         self.build_ready(workspace, window, cx);
     }
 
-    fn build_ready(&mut self, workspace: &mut Workspace, window: &mut Window, cx: &mut App) {
-        set_title_bar_mode(workspace, KnightCodeMode::Build, cx);
-        // Reveal the agent after the queued dock restoration, and update the
-        // workspace entity to obtain Context<Workspace> (not Context<Self>).
-        // Doing this immediately would both use the wrong context and let the
-        // restored dock state hide the agent panel again.
+    fn enable_workbench(&mut self, _workspace: &Workspace, window: &mut Window, cx: &mut App) {
+        if self.previous_build_theme.is_none()
+            && let Ok(theme) = theme::ThemeRegistry::global(cx).get("KnightCode Workbench")
+        {
+            self.previous_build_theme = Some(theme::GlobalTheme::theme(cx).clone());
+            self.build_theme_selection =
+                Some(theme_settings::ThemeSettings::get_global(cx).theme.clone());
+            let theme = theme_settings::ThemeSettings::get_global(cx).apply_theme_overrides(theme);
+            theme::GlobalTheme::update_theme(cx, theme);
+            window.refresh();
+        }
         let workspace_handle = self.workspace.clone();
+        let modes = cx
+            .global::<WorkspaceModesRegistry>()
+            .0
+            .get(&self.workspace.entity_id())
+            .cloned();
         window.defer(cx, move |window, cx| {
             workspace_handle
                 .update(cx, |workspace, cx| {
-                    // A quick switch back to a front page must not reopen docks.
+                    // Dock restoration is queued first. A newer Home/Chat navigation
+                    // must win over this deferred Build request.
                     if workspace.active_item_as::<KnightCodePage>(cx).is_none() {
-                        workspace.reveal_panel::<AgentPanel>(window, cx);
+                        let first_layout = modes
+                            .as_ref()
+                            .and_then(|modes| modes.upgrade())
+                            .is_none_or(|modes| !modes.read(cx).build_layout_initialized);
+                        let pages = workspace
+                            .items_of_type::<KnightCodePage>(cx)
+                            .collect::<Vec<_>>();
+                        if let Some(modes) = modes.as_ref() {
+                            modes
+                                .update(cx, |modes, _| {
+                                    for page in &pages {
+                                        if !modes
+                                            .cached_pages
+                                            .iter()
+                                            .any(|cached| cached.entity_id() == page.entity_id())
+                                        {
+                                            modes.cached_pages.push(page.clone());
+                                        }
+                                    }
+                                })
+                                .log_err();
+                        }
+                        // Keep front-page state/drafts alive, but never expose
+                        // Home, Chat, Models or Account as ordinary editor tabs.
+                        for pane in workspace.panes() {
+                            pane.update(cx, |pane, cx| {
+                                for page in &pages {
+                                    pane.remove_item(page.entity_id(), false, false, window, cx);
+                                }
+                            });
+                        }
+                        super::build_layout::enable(workspace, first_layout, window, cx);
+                        if let Some(modes) = modes.as_ref() {
+                            modes
+                                .update(cx, |modes, cx| {
+                                    let mask = super::build_layout::panel_mask(workspace, cx);
+                                    modes.build_layout_initialized = mask == 7;
+                                    modes.last_build_panel_mask = mask;
+                                })
+                                .log_err();
+                        }
                     }
                 })
                 .log_err();
         });
+    }
+
+    fn build_ready(&mut self, workspace: &mut Workspace, window: &mut Window, cx: &mut App) {
+        set_title_bar_mode(workspace, KnightCodeMode::Build, cx);
+        self.enable_workbench(workspace, window, cx);
         let item = self
             .build_item
             .as_ref()
@@ -520,7 +705,9 @@ impl WorkspaceModes {
         if let Some(item) = item {
             workspace.activate_item(item.as_ref(), true, true, window, cx);
         } else {
-            window.dispatch_action(workspace::NewFile.boxed_clone(), cx);
+            let welcome =
+                cx.new(|cx| super::build_welcome::BuildWelcome::new(self.workspace.clone(), cx));
+            workspace.add_item_to_active_pane(Box::new(welcome), None, true, window, cx);
         }
     }
 
@@ -548,6 +735,9 @@ impl WorkspaceModes {
                 self.restore(workspace, window, cx);
             }
             self.build_item = workspace.active_item(cx).map(|item| item.downgrade_item());
+            if !workspace.is_knightcode_build() {
+                self.enable_workbench(workspace, window, cx);
+            }
         }
     }
 }

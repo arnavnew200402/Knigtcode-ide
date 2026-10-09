@@ -47,6 +47,7 @@ struct MenuEntry {
 pub struct ApplicationMenu {
     entries: SmallVec<[MenuEntry; 8]>,
     pending_menu_open: Option<String>,
+    workbench_menus: bool,
     _settings_subscription: Subscription,
 }
 
@@ -75,6 +76,7 @@ impl ApplicationMenu {
         Self {
             entries,
             pending_menu_open: None,
+            workbench_menus: false,
             _settings_subscription: settings_subscription,
         }
     }
@@ -300,8 +302,15 @@ impl ApplicationMenu {
         cx.defer_in(window, move |_, window, cx| next_handle.show(window, cx));
     }
 
+    pub fn set_workbench_menus(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.workbench_menus != enabled {
+            self.workbench_menus = enabled;
+            cx.notify();
+        }
+    }
+
     pub fn all_menus_shown(&self, cx: &mut Context<Self>) -> bool {
-        show_menus(cx)
+        self.workbench_menus || show_menus(cx)
             || self.entries.iter().any(|entry| entry.handle.is_deployed())
             || self.pending_menu_open.is_some()
             // In accessible mode, keep the full menu bar expanded so every menu
@@ -359,6 +368,14 @@ impl Render for ApplicationMenu {
                 this.children(
                     self.entries
                         .iter()
+                        .filter(|entry| {
+                            !self.workbench_menus
+                                || cx.accessible_mode()
+                                || !matches!(
+                                    entry.menu.name.as_ref(),
+                                    "KnightCode" | "Go" | "Run" | "Window"
+                                )
+                        })
                         .map(|entry| self.render_standard_menu(entry)),
                 )
             })

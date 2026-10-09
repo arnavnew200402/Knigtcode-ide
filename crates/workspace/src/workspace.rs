@@ -1576,8 +1576,18 @@ struct DispatchingKeystrokes {
 /// A `Workspace` usually consists of 1 or more projects, a central pane group, 3 docks and a status bar.
 /// The `Workspace` owns everybody's state and serves as a default, "global context",
 /// that can be used to register a global action to be triggered from any place in the window.
+/// Connected workbench actions supplied by the product shell, without adding
+/// project/agent panel dependencies to the workspace crate.
+pub struct WorkbenchActivity {
+    pub id: SharedString,
+    pub label: SharedString,
+    pub icon: ui::IconName,
+    pub action: Box<dyn Action>,
+}
+
 pub struct Workspace {
     weak_self: WeakEntity<Self>,
+    knightcode_activities: Vec<WorkbenchActivity>,
     workspace_actions: Vec<Box<dyn Fn(Div, &Workspace, &mut Window, &mut Context<Self>) -> Div>>,
     zoomed: Option<AnyWeakView>,
     previous_dock_drag_coordinates: Option<Point<Pixels>>,
@@ -2133,6 +2143,7 @@ impl Workspace {
             // This data will be incorrect, but it will be overwritten by the time it needs to be used.
             bounds: Default::default(),
             centered_layout: false,
+            knightcode_activities: Vec::new(),
             bounds_save_task_queued: None,
             on_prompt_for_new_path: None,
             on_prompt_for_open_path: None,
@@ -2448,6 +2459,89 @@ impl Workspace {
 
     pub fn weak_handle(&self) -> WeakEntity<Self> {
         self.weak_self.clone()
+    }
+
+    pub fn set_knightcode_workbench(
+        &mut self,
+        activities: Vec<WorkbenchActivity>,
+        cx: &mut Context<Self>,
+    ) {
+        self.knightcode_activities = activities;
+        cx.notify();
+    }
+
+    pub fn is_knightcode_build(&self) -> bool {
+        !self.knightcode_activities.is_empty()
+    }
+
+    pub fn knightcode_explorer_footer(&self) -> Vec<(SharedString, Box<dyn Action>)> {
+        self.knightcode_activities
+            .iter()
+            .filter(|activity| matches!(activity.id.as_ref(), "outline" | "timeline"))
+            .map(|activity| (activity.label.clone(), activity.action.boxed_clone()))
+            .collect()
+    }
+
+    fn render_knightcode_activity_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let explorer_open = self.left_dock.read(cx).is_open()
+            && self
+                .left_dock
+                .read(cx)
+                .active_panel()
+                .is_some_and(|panel| panel.persistent_name() == "Project Panel");
+        v_flex()
+            .w(px(60.))
+            .h_full()
+            .flex_none()
+            .gap_1()
+            .border_r_1()
+            .border_color(gpui::rgb(0x4a2c12))
+            .bg(gpui::rgb(0x0a0806))
+            .children(
+                self.knightcode_activities
+                    .iter()
+                    .filter(|activity| !matches!(activity.id.as_ref(), "outline" | "timeline"))
+                    .map(|activity| {
+                        let selected = activity.id.as_ref() == "explorer" && explorer_open;
+                        let action = activity.action.boxed_clone();
+                        div()
+                            .w_full()
+                            .rounded_lg()
+                            .overflow_hidden()
+                            .when(selected, |button| {
+                                button.border_1().border_color(gpui::rgb(0xe88422)).bg(
+                                    gpui::linear_gradient(
+                                        135.,
+                                        gpui::linear_color_stop(gpui::rgb(0x6d320b), 0.),
+                                        gpui::linear_color_stop(gpui::rgb(0x221207), 1.),
+                                    ),
+                                )
+                            })
+                            .child(
+                                ui::ButtonLike::new(activity.id.clone())
+                                    .full_width()
+                                    .height(px(54.).into())
+                                    .style(ButtonStyle::Transparent)
+                                    .aria_label(activity.label.clone())
+                                    .tooltip(ui::Tooltip::text(activity.label.clone()))
+                                    .child(
+                                        ui::Icon::new(activity.icon)
+                                            .size(ui::IconSize::Medium)
+                                            .color(ui::Color::Custom(
+                                                gpui::rgb(if selected {
+                                                    0xffb864
+                                                } else {
+                                                    0xe3ded5
+                                                })
+                                                .into(),
+                                            )),
+                                    )
+                                    .on_click(move |_, window, cx| {
+                                        window.dispatch_action(action.boxed_clone(), cx)
+                                    }),
+                            )
+                    }),
+            )
     }
 
     pub fn left_dock(&self) -> &Entity<Dock> {
@@ -9744,8 +9838,14 @@ impl Render for Workspace {
                                     },
                                 ))
                             })
-                            .child({
-                                match bottom_dock_layout {
+                            .child(
+                                h_flex()
+                                    .size_full()
+                                    .when(self.is_knightcode_build(), |body| {
+                                        body.child(self.render_knightcode_activity_rail(cx))
+                                    })
+                                    .child({
+                                        match bottom_dock_layout {
                                     BottomDockLayout::Full => div()
                                         .flex()
                                         .flex_col()
@@ -9979,8 +10079,9 @@ impl Render for Workspace {
                                             window,
                                             cx,
                                         )),
-                                }
-                            })
+                                }.flex_1().min_w_0()
+                                    }),
+                            )
                             .children(self.zoomed.as_ref().and_then(|view| {
                                 let zoomed_view = view.upgrade()?;
                                 let div = div()
@@ -10007,7 +10108,14 @@ impl Render for Workspace {
                             .children(self.render_notifications(window, cx)),
                     )
                     .when(self.status_bar_visible(cx), |parent| {
-                        parent.child(self.status_bar.clone())
+                        parent.child(
+                            div()
+                                .w_full()
+                                .when(self.is_knightcode_build(), |bar| {
+                                    bar.h(px(50.)).flex().items_center().bg(gpui::rgb(0x0c0905))
+                                })
+                                .child(self.status_bar.clone()),
+                        )
                     })
                     .child(self.toast_layer.clone()),
             )

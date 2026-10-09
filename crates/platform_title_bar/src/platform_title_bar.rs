@@ -34,6 +34,7 @@ pub struct PlatformTitleBar {
     button_layout: Option<WindowButtonLayout>,
     multi_workspace: Option<WeakEntity<MultiWorkspace>>,
     knightcode_chat: bool,
+    knightcode_build: bool,
 }
 
 impl PlatformTitleBar {
@@ -50,6 +51,7 @@ impl PlatformTitleBar {
             button_layout: None,
             multi_workspace: None,
             knightcode_chat: false,
+            knightcode_build: false,
         }
     }
 
@@ -69,9 +71,19 @@ impl PlatformTitleBar {
         }
     }
 
+    pub fn set_knightcode_build(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.knightcode_build != enabled {
+            self.knightcode_build = enabled;
+            cx.notify();
+        }
+    }
+
     pub fn title_bar_color(&self, window: &mut Window, cx: &mut Context<Self>) -> Hsla {
         if self.knightcode_chat {
             return gpui::rgb(0x090d17).into();
+        }
+        if self.knightcode_build {
+            return gpui::rgb(0x0b0804).into();
         }
         if cfg!(any(target_os = "linux", target_os = "freebsd")) {
             if window.is_window_active() && !self.should_move {
@@ -211,6 +223,8 @@ impl Render for PlatformTitleBar {
         let decorations = window.window_decorations();
         let height = if self.knightcode_chat {
             px(70.)
+        } else if self.knightcode_build {
+            px(58.)
         } else {
             platform_title_bar_height(window)
         };
@@ -369,7 +383,7 @@ impl Render for PlatformTitleBar {
         v_flex()
             .w_full()
             .child(title_bar)
-            .when(!self.knightcode_chat, |bar| {
+            .when(!self.knightcode_chat && !self.knightcode_build, |bar| {
                 bar.child(self.system_window_tabs.clone().into_any_element())
             })
     }

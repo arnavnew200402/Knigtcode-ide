@@ -7123,6 +7123,17 @@ fn item_width_estimate(depth: usize, item_text_chars: usize, is_symlink: bool) -
     item_width
 }
 
+fn build_sidebar_artwork() -> Arc<gpui::Image> {
+    static ART: std::sync::OnceLock<Arc<gpui::Image>> = std::sync::OnceLock::new();
+    ART.get_or_init(|| {
+        Arc::new(gpui::Image::from_bytes(
+            gpui::ImageFormat::Png,
+            include_bytes!("../assets/build-sidebar.png").to_vec(),
+        ))
+    })
+    .clone()
+}
+
 impl Render for ProjectPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let has_worktree = !self.state.visible_entries.is_empty();
@@ -7151,8 +7162,16 @@ impl Render for ProjectPanel {
         // version that understands these messages.
         let is_collab = project.is_via_collab();
         let is_local = project.is_local();
+        let workspace = self.workspace.upgrade();
+        let build = workspace
+            .as_ref()
+            .is_some_and(|workspace| workspace.read(cx).is_knightcode_build());
+        let footer = workspace
+            .as_ref()
+            .map(|workspace| workspace.read(cx).knightcode_explorer_footer())
+            .unwrap_or_default();
 
-        if has_worktree {
+        let content = if has_worktree {
             let item_count = self
                 .state
                 .visible_entries
@@ -7791,7 +7810,91 @@ impl Render for ProjectPanel {
                         ))
                     })
                 })
-        }
+        };
+        v_flex()
+            .size_full()
+            .min_h_0()
+            .relative()
+            .overflow_hidden()
+            .when(build, |panel| {
+                panel.bg(gpui::rgb(0x0b0805)).child(
+                    gpui::img(build_sidebar_artwork())
+                        .absolute()
+                        .left_0()
+                        .bottom(px(82.))
+                        .w_full()
+                        .h(px(354.)),
+                )
+            })
+            .when(build, |panel| {
+                panel.child(
+                    h_flex()
+                        .h(px(46.))
+                        .flex_none()
+                        .px_3()
+                        .justify_between()
+                        .border_b_1()
+                        .border_color(gpui::rgb(0x39220e))
+                        .bg(gpui::rgb(0x0c0906))
+                        .child(
+                            Label::new("EXPLORER")
+                                .size(LabelSize::Small)
+                                .color(Color::Custom(gpui::rgb(0xe8d9c1).into())),
+                        )
+                        .child(
+                            h_flex()
+                                .gap_1()
+                                .child(
+                                    IconButton::new("build-new-file", IconName::File)
+                                        .tooltip(Tooltip::text("New File"))
+                                        .disabled(!has_worktree || project.is_read_only(cx))
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.new_file(&NewFile, window, cx)
+                                        })),
+                                )
+                                .child(
+                                    IconButton::new("build-new-folder", IconName::FolderAdd)
+                                        .tooltip(Tooltip::text("New Folder"))
+                                        .disabled(!has_worktree || project.is_read_only(cx))
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.new_directory(&NewDirectory, window, cx)
+                                        })),
+                                ),
+                        ),
+                )
+            })
+            .child(div().flex_1().min_h_0().child(content))
+            .when(build, |panel| {
+                panel.children(footer.into_iter().map(|(label, action)| {
+                    div()
+                        .w_full()
+                        .border_t_1()
+                        .border_color(gpui::rgb(0x39220e))
+                        .bg(gpui::rgb(0x0c0906))
+                        .child(
+                            ui::ButtonLike::new(format!("build-footer-{label}"))
+                                .full_width()
+                                .height(px(40.).into())
+                                .style(ButtonStyle::Transparent)
+                                .aria_label(label.clone())
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .px_3()
+                                        .gap_2()
+                                        .child(
+                                            Icon::new(IconName::ChevronRight).size(IconSize::Small),
+                                        )
+                                        .child(
+                                            Label::new(label.to_uppercase()).size(LabelSize::Small),
+                                        ),
+                                )
+                                .on_click(move |_, window, cx| {
+                                    window.dispatch_action(action.boxed_clone(), cx)
+                                }),
+                        )
+                }))
+            })
     }
 }
 

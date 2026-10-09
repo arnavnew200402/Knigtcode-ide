@@ -11,6 +11,8 @@
 //! signed in is signed in here, because it is the same `auth.json`, and a
 //! machine where a model is already recorded already has one.
 
+mod build_layout;
+mod build_welcome;
 mod workspace_modes;
 
 pub use title_bar::{KnightCodeMode, ShowAccount, ShowBuild, ShowChat, ShowHome, ShowModels};

@@ -37,6 +37,7 @@ pub struct ConfigOptionsView {
     fs: Arc<dyn Fs>,
     config_option_ids: Vec<acp::SessionConfigId>,
     chat_presentation: bool,
+    build_presentation: bool,
     _refresh_task: Task<()>,
 }
 
@@ -71,6 +72,7 @@ impl ConfigOptionsView {
             fs,
             config_option_ids,
             chat_presentation: false,
+            build_presentation: false,
             _refresh_task: refresh_task,
         }
     }
@@ -83,6 +85,11 @@ impl ConfigOptionsView {
                 cx.notify();
             });
         }
+        cx.notify();
+    }
+
+    pub(crate) fn set_build_presentation(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.build_presentation = enabled;
         cx.notify();
     }
 
@@ -290,11 +297,13 @@ impl Render for ConfigOptionsView {
         if self.selectors.is_empty() {
             return div().into_any_element();
         }
-        if self.chat_presentation {
+        if self.chat_presentation || self.build_presentation {
+            let build = self.build_presentation;
             return h_flex()
                 .min_w_0()
                 .flex_wrap()
-                .gap_3()
+                .gap(if build { px(8.) } else { px(12.) })
+                .when(build, |row| row.w_full())
                 .children(self.selectors.iter().filter_map(|selector| {
                     let option = selector.read(cx).current_option()?;
                     // The Chat/Build title-bar switch owns mode navigation.
@@ -308,14 +317,15 @@ impl Render for ConfigOptionsView {
                         || option.id.0.as_ref() == "thinking";
                     Some(
                         h_flex()
-                            .h(px(48.))
+                            .h(px(if build { 50. } else { 48. }))
+                            .when(build, |control| control.flex_1())
                             .min_w_0()
                             .px_2()
                             .gap_2()
                             .rounded_lg()
                             .border_1()
-                            .border_color(gpui::rgba(0x82779930))
-                            .bg(gpui::rgb(0x0d1220))
+                            .border_color(gpui::rgba(if build { 0x98602870 } else { 0x82779930 }))
+                            .bg(gpui::rgb(if build { 0x181108 } else { 0x0d1220 }))
                             .child(
                                 Icon::new(if thinking {
                                     IconName::ThinkingMode
@@ -323,7 +333,14 @@ impl Render for ConfigOptionsView {
                                     IconName::AiZed
                                 })
                                 .color(Color::Custom(
-                                    gpui::rgb(if thinking { 0xb6b0d4 } else { 0x9d79ff }).into(),
+                                    gpui::rgb(if build {
+                                        0xffa237
+                                    } else if thinking {
+                                        0xb6b0d4
+                                    } else {
+                                        0x9d79ff
+                                    })
+                                    .into(),
                                 )),
                             )
                             .child(selector.clone()),
@@ -1196,6 +1213,7 @@ mod tests {
                 agent_server,
                 fs,
                 chat_presentation: false,
+                build_presentation: false,
                 _refresh_task: Task::ready(()),
             });
 
@@ -1240,6 +1258,7 @@ mod tests {
                 agent_server,
                 fs,
                 chat_presentation: false,
+                build_presentation: false,
                 _refresh_task: Task::ready(()),
             });
 
@@ -1294,6 +1313,7 @@ mod tests {
                 agent_server,
                 fs,
                 chat_presentation: false,
+                build_presentation: false,
                 _refresh_task: Task::ready(()),
             });
 

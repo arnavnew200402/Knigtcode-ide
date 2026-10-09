@@ -1,3 +1,5 @@
+mod build_presentation;
+
 use crate::{
     DEFAULT_THREAD_TITLE, SelectPermissionGranularity,
     agent_configuration::configure_context_server_modal::default_markdown_style,
@@ -622,6 +624,7 @@ pub struct ThreadView {
     pub _subscriptions: Vec<Subscription>,
     pub message_editor: Entity<MessageEditor>,
     full_page_chat: bool,
+    build_presentation: bool,
     chat_artwork: Option<super::chat_presentation::ChatArtwork>,
     knightcode_tasks: Option<Entity<crate::knightcode_tasks::KnightCodeTasks>>,
     voice_input: Entity<voice_input::VoiceInput>,
@@ -1078,6 +1081,7 @@ impl ThreadView {
             in_flight_prompt: None,
             message_editor,
             full_page_chat: false,
+            build_presentation: false,
             chat_artwork: None,
             knightcode_tasks,
             voice_input,
@@ -4382,6 +4386,9 @@ impl ThreadView {
         cx: &mut Context<Self>,
     ) {
         let enabled = enabled && !self.is_subagent();
+        if enabled {
+            self.set_build_presentation(false, window, cx);
+        }
         if self.full_page_chat == enabled {
             return;
         }
@@ -4421,6 +4428,66 @@ impl ThreadView {
             .update(cx, |voice, cx| voice.set_compact(enabled, cx));
         if let Some(config) = &self.config_options_view {
             config.update(cx, |config, cx| config.set_chat_presentation(enabled, cx));
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn set_build_presentation(
+        &mut self,
+        enabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let enabled =
+            enabled && !self.is_subagent() && self.agent_id == agent::ZED_AGENT_ID.clone();
+        if enabled {
+            self.set_full_page_chat(false, window, cx);
+        }
+        if self.build_presentation == enabled {
+            return;
+        }
+        self.build_presentation = enabled;
+        self.message_editor.update(cx, |editor, cx| {
+            editor.set_build_presentation(enabled, window, cx);
+            editor.set_mode(
+                editor::EditorMode::AutoHeight {
+                    min_lines: if enabled {
+                        2
+                    } else if self.full_page_chat {
+                        2
+                    } else {
+                        AgentSettings::get_global(cx).message_editor_min_lines
+                    },
+                    max_lines: Some(if enabled {
+                        6
+                    } else if self.full_page_chat {
+                        8
+                    } else {
+                        AgentSettings::get_global(cx).set_message_editor_max_lines()
+                    }),
+                },
+                cx,
+            );
+            if !enabled && !self.full_page_chat {
+                editor.set_placeholder_text(
+                    &placeholder_text(
+                        &self.agent_display_name,
+                        self.session_capabilities.read().has_slash_completions(),
+                    ),
+                    window,
+                    cx,
+                );
+            }
+        });
+        self.voice_input.update(cx, |voice, cx| {
+            voice.set_compact(enabled || self.full_page_chat, cx);
+            voice.set_copper(enabled, cx);
+        });
+        if let Some(config) = &self.config_options_view {
+            config.update(cx, |config, cx| config.set_build_presentation(enabled, cx));
+        }
+        if let Some(tasks) = &self.knightcode_tasks {
+            tasks.update(cx, |tasks, cx| tasks.set_build_presentation(enabled, cx));
         }
         cx.notify();
     }
@@ -4591,7 +4658,7 @@ impl ThreadView {
                                             .children(self.render_thinking_control(cx)),
                                     })
                                     .child(self.voice_input.clone())
-                                    .child(self.render_chat_send_button(cx)),
+                                    .child(self.render_connected_send_button(cx)),
                             ),
                     ),
             )
@@ -4613,7 +4680,7 @@ impl ThreadView {
         }
     }
 
-    fn render_chat_send_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_connected_send_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let empty = self.message_editor.read(cx).is_empty(cx);
         let generating = self.thread.read(cx).status() != ThreadStatus::Idle;
         let stopping = generating && empty;
@@ -4624,46 +4691,53 @@ impl ThreadView {
             IconName::Stop
         } else if generating {
             IconName::QueueMessage
+        } else if self.build_presentation {
+            IconName::ChevronRight
         } else {
             IconName::ArrowUp
         };
+        let build = self.build_presentation;
+        let size = 52.;
         div()
-            .size(px(52.))
+            .size(px(size))
             .flex_none()
             .rounded_full()
+            .when(build, |button| button.w(px(70.)).rounded_lg())
             .overflow_hidden()
             .bg(linear_gradient(
                 135.,
-                linear_color_stop(gpui::rgb(0xb194ff), 0.),
-                linear_color_stop(gpui::rgb(0x7950e8), 1.),
+                linear_color_stop(gpui::rgb(if build { 0xffce6c } else { 0xb194ff }), 0.),
+                linear_color_stop(gpui::rgb(if build { 0xe98921 } else { 0x7950e8 }), 1.),
             ))
             .child(
-                ButtonLike::new("chat-send-message")
-                    .full_width()
-                    .height(px(52.).into())
-                    .style(ButtonStyle::Transparent)
-                    .disabled(disabled)
-                    .tooltip(Tooltip::text(if self.is_loading_contents {
-                        "Loading attached context…"
-                    } else if stopping {
-                        "Stop generation"
-                    } else if generating {
-                        "Queue message"
+                ButtonLike::new(if build {
+                    "build-send-message"
+                } else {
+                    "chat-send-message"
+                })
+                .full_width()
+                .height(px(size).into())
+                .style(ButtonStyle::Transparent)
+                .disabled(disabled)
+                .tooltip(Tooltip::text(if self.is_loading_contents {
+                    "Loading attached context…"
+                } else if stopping {
+                    "Stop generation"
+                } else if generating {
+                    "Queue message"
+                } else {
+                    "Send message"
+                }))
+                .child(Icon::new(icon).size(IconSize::Medium).color(Color::Custom(
+                    gpui::rgb(if build { 0xfff1d9 } else { 0x100b29 }).into(),
+                )))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    if stopping {
+                        this.cancel_generation(cx)
                     } else {
-                        "Send message"
-                    }))
-                    .child(
-                        Icon::new(icon)
-                            .size(IconSize::Medium)
-                            .color(Color::Custom(gpui::rgb(0x100b29).into())),
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        if stopping {
-                            this.cancel_generation(cx)
-                        } else {
-                            this.send(window, cx)
-                        }
-                    })),
+                        this.send(window, cx)
+                    }
+                })),
             )
     }
 
@@ -4678,6 +4752,9 @@ impl ThreadView {
 
         if self.full_page_chat {
             return self.render_chat_composer(cx);
+        }
+        if self.build_presentation {
+            return self.render_build_composer(cx);
         }
 
         let focus_handle = self.message_editor.focus_handle(cx);
@@ -5825,12 +5902,12 @@ impl ThreadView {
         PopoverMenu::new("add-context-menu")
             .trigger_with_tooltip(
                 IconButton::new("add-context", IconName::Plus)
-                    .size(if self.full_page_chat {
+                    .size(if self.full_page_chat || self.build_presentation {
                         ButtonSize::Large
                     } else {
                         ButtonSize::Default
                     })
-                    .icon_size(if self.full_page_chat {
+                    .icon_size(if self.full_page_chat || self.build_presentation {
                         IconSize::Medium
                     } else {
                         IconSize::Small
@@ -12536,6 +12613,12 @@ impl Render for ThreadView {
                         .min_h_0()
                         .child(artwork.welcome(self.chat_display_name(cx), window))
                         .into_any_element()
+                } else if self.build_presentation {
+                    this.flex_1()
+                        .size_full()
+                        .min_h_0()
+                        .child(self.render_build_welcome(cx))
+                        .into_any_element()
                 } else {
                     this.into_any()
                 }
@@ -12551,8 +12634,20 @@ impl Render for ThreadView {
                         view.child(artwork.background())
                     })
             })
+            .when(self.build_presentation, |view| {
+                view.bg(linear_gradient(
+                    140.,
+                    linear_color_stop(gpui::rgb(0x080704), 0.),
+                    linear_color_stop(gpui::rgb(0x28180a), 1.),
+                ))
+            })
             .key_context("AcpThread")
             .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &crate::OpenTaskPanel, _, cx| {
+                if let Some(tasks) = &this.knightcode_tasks {
+                    tasks.update(cx, |tasks, cx| tasks.open_task_panel(cx));
+                }
+            }))
             .on_action(cx.listener(|this, _: &menu::Cancel, _, cx| {
                 if this.parent_session_id.is_none() {
                     this.cancel_generation(cx);
