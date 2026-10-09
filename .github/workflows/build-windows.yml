@@ -130,10 +130,28 @@ jobs:
       - name: Acquire verified desktop resources
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path target/resources | Out-Null
-          script/acquire-desktop-resources.ps1 `
-            -OutputDirectory target/resources/desktop `
-            -ExpectedArchitecture x64
+          $resourceDirectory = 'target/resources/desktop'
+          $reuseResources = $false
+          # The Cargo target cache can restore this bundle from a previous run.
+          # Never reuse it without checking the reviewed specification and hashes.
+          if (Test-Path -LiteralPath $resourceDirectory) {
+            try {
+              script/acquire-desktop-resources.ps1 `
+                -OutputDirectory $resourceDirectory `
+                -ExpectedArchitecture x64 -VerifyOnly
+              $reuseResources = $true
+            } catch {
+              Write-Warning "Cached desktop resources failed verification; reacquiring: $($_.Exception.Message)"
+              Remove-Item -LiteralPath $resourceDirectory -Recurse -Force
+            }
+          }
+          if (-not $reuseResources) {
+            script/acquire-desktop-resources.ps1 `
+              -OutputDirectory $resourceDirectory `
+              -ExpectedArchitecture x64
+          }
 
       - name: Set bundle version
         shell: pwsh
