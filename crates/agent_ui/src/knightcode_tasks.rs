@@ -6,7 +6,7 @@ use editor::Editor;
 use gpui::{AppContext as _, Entity, EventEmitter, Focusable as _, Subscription, Task};
 use knightcode_engine::{
     Engine, EngineClient, EngineEvent,
-    client::EngineModel,
+    client::{ClientError, EngineModel},
     tasks::{AgentProfile, SubagentConfig, TaskInput, TaskSnapshot},
 };
 use ui::{ContextMenu, Divider, PopoverMenu, prelude::*};
@@ -76,6 +76,7 @@ pub struct KnightCodeTasks {
     error: Option<String>,
     connection_error: Option<String>,
     connected: bool,
+    available: bool,
     loading: bool,
     busy: bool,
     refresh_task: Option<Task<()>>,
@@ -171,6 +172,7 @@ impl KnightCodeTasks {
             error: None,
             connection_error: None,
             connected: false,
+            available: true,
             loading: false,
             busy: false,
             refresh_task: None,
@@ -275,16 +277,28 @@ impl KnightCodeTasks {
         self.loading = true;
         self.refresh_task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = async {
-                let config = client.subagent_config(&session_id).await?;
+                let config = match client.subagent_config(&session_id).await {
+                    Ok(config) => config,
+                    // Older bundled engines do not expose the optional task
+                    // API. That must not surface as a conversation error.
+                    Err(ClientError::Status { status: 404, .. }) => return anyhow::Ok(None),
+                    Err(error) => return Err(error.into()),
+                };
                 let tasks = client.tasks(&session_id).await?;
                 let models = client.models().await?;
-                anyhow::Ok((config, tasks, models.models))
+                anyhow::Ok(Some((config, tasks, models.models)))
             }
             .await;
             this.update_in(cx, |this, window, cx| {
                 this.loading = false;
                 match result {
-                    Ok((config, tasks, models)) => {
+                    Ok(None) => {
+                        this.available = false;
+                        this.connected = false;
+                        this.connection_error = None;
+                    }
+                    Ok(Some((config, tasks, models))) => {
+                        this.available = true;
                         this.connected = true;
                         this.connection_error = None;
                         this.install_config(config, window, cx);
@@ -638,6 +652,9 @@ impl KnightCodeTasks {
 
 impl Render for KnightCodeTasks {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.available {
+            return div().into_any_element();
+        }
         let can_dispatch = self.connected
             && !self.busy
             && self.config.as_ref().is_some_and(|config| config.enabled);

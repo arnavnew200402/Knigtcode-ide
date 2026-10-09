@@ -19,7 +19,7 @@ use parking_lot::Mutex;
 use serde::Deserialize;
 use settings::Settings;
 use sha2::{Digest, Sha256};
-use ui::prelude::*;
+use ui::{ButtonLike, Tooltip, prelude::*};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 mod audio_samples;
@@ -334,6 +334,7 @@ fn transcribe(model: &SpeechModel, samples: &[f32], cancelled: Arc<AtomicBool>) 
 
 pub struct VoiceInput {
     status: VoiceStatus,
+    compact: bool,
     capture: Option<MicrophoneCapture>,
     cancelled: Arc<AtomicBool>,
     generation: u64,
@@ -351,6 +352,7 @@ impl VoiceInput {
         });
         Self {
             status: VoiceStatus::Idle,
+            compact: false,
             capture: None,
             cancelled: Arc::new(AtomicBool::new(false)),
             generation: 0,
@@ -363,6 +365,13 @@ impl VoiceInput {
 
     pub fn status(&self) -> &VoiceStatus {
         &self.status
+    }
+
+    pub fn set_compact(&mut self, compact: bool, cx: &mut Context<Self>) {
+        if self.compact != compact {
+            self.compact = compact;
+            cx.notify();
+        }
     }
 
     fn set_status(&mut self, status: VoiceStatus, cx: &mut Context<Self>) {
@@ -490,6 +499,62 @@ impl Render for VoiceInput {
             VoiceStatus::Cancelled => "Dictation cancelled".to_owned(),
             VoiceStatus::Error(error) => error.clone(),
         };
+        if self.compact {
+            return h_flex()
+                .gap_1()
+                .on_action(
+                    cx.listener(|this, _: &StartRecording, window, cx| this.start(window, cx)),
+                )
+                .on_action(cx.listener(|this, _: &StopRecording, window, cx| this.stop(window, cx)))
+                .on_action(cx.listener(|this, _: &CancelRecording, _, cx| this.cancel(cx)))
+                .child(
+                    div()
+                        .size(px(48.))
+                        .rounded_full()
+                        .border_1()
+                        .border_color(gpui::rgba(0x8c83af30))
+                        .overflow_hidden()
+                        .child(
+                            ButtonLike::new("chat-voice-record")
+                                .full_width()
+                                .height(px(48.).into())
+                                .style(ButtonStyle::Transparent)
+                                .disabled(busy)
+                                .tooltip(Tooltip::text(label))
+                                .child(
+                                    Icon::new(if recording {
+                                        IconName::Stop
+                                    } else {
+                                        IconName::Mic
+                                    })
+                                    .size(IconSize::Medium)
+                                    .color(
+                                        if recording || matches!(self.status, VoiceStatus::Error(_))
+                                        {
+                                            Color::Error
+                                        } else {
+                                            Color::Custom(gpui::rgb(0xbcb7da).into())
+                                        },
+                                    ),
+                                )
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    if recording {
+                                        this.stop(window, cx)
+                                    } else {
+                                        this.start(window, cx)
+                                    }
+                                })),
+                        ),
+                )
+                .when(recording || busy, |controls| {
+                    controls.child(
+                        IconButton::new("chat-voice-cancel", IconName::Close)
+                            .tooltip(Tooltip::text("Cancel dictation"))
+                            .on_click(cx.listener(|this, _, _, cx| this.cancel(cx))),
+                    )
+                })
+                .into_any_element();
+        }
         h_flex()
             .gap_1()
             .on_action(cx.listener(|this, _: &StartRecording, window, cx| this.start(window, cx)))
@@ -526,6 +591,7 @@ impl Render for VoiceInput {
                     Color::Muted
                 },
             ))
+            .into_any_element()
     }
 }
 

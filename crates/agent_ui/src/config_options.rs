@@ -36,6 +36,7 @@ pub struct ConfigOptionsView {
     agent_server: Rc<dyn AgentServer>,
     fs: Arc<dyn Fs>,
     config_option_ids: Vec<acp::SessionConfigId>,
+    chat_presentation: bool,
     _refresh_task: Task<()>,
 }
 
@@ -69,8 +70,20 @@ impl ConfigOptionsView {
             agent_server,
             fs,
             config_option_ids,
+            chat_presentation: false,
             _refresh_task: refresh_task,
         }
+    }
+
+    pub(crate) fn set_chat_presentation(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.chat_presentation = enabled;
+        for selector in &self.selectors {
+            selector.update(cx, |selector, cx| {
+                selector.chat_presentation = enabled;
+                cx.notify();
+            });
+        }
+        cx.notify();
     }
 
     pub fn toggle_category_picker(
@@ -240,7 +253,7 @@ impl ConfigOptionsView {
             window,
             cx,
         );
-        cx.notify();
+        self.set_chat_presentation(self.chat_presentation, cx);
     }
 
     fn build_selectors(
@@ -273,9 +286,50 @@ impl ConfigOptionsView {
 }
 
 impl Render for ConfigOptionsView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.selectors.is_empty() {
             return div().into_any_element();
+        }
+        if self.chat_presentation {
+            return h_flex()
+                .min_w_0()
+                .flex_wrap()
+                .gap_3()
+                .children(self.selectors.iter().filter_map(|selector| {
+                    let option = selector.read(cx).current_option()?;
+                    // The Chat/Build title-bar switch owns mode navigation.
+                    if option.category == Some(acp::SessionConfigOptionCategory::Mode)
+                        || option.id.0.as_ref() == "mode"
+                    {
+                        return None;
+                    }
+                    let thinking = option.category
+                        == Some(acp::SessionConfigOptionCategory::ThoughtLevel)
+                        || option.id.0.as_ref() == "thinking";
+                    Some(
+                        h_flex()
+                            .h(px(48.))
+                            .min_w_0()
+                            .px_2()
+                            .gap_2()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(gpui::rgba(0x82779930))
+                            .bg(gpui::rgb(0x0d1220))
+                            .child(
+                                Icon::new(if thinking {
+                                    IconName::ThinkingMode
+                                } else {
+                                    IconName::AiZed
+                                })
+                                .color(Color::Custom(
+                                    gpui::rgb(if thinking { 0xb6b0d4 } else { 0x9d79ff }).into(),
+                                )),
+                            )
+                            .child(selector.clone()),
+                    )
+                }))
+                .into_any_element();
         }
 
         h_flex()
@@ -295,6 +349,7 @@ struct ConfigOptionSelector {
     picker_handle: Option<PopoverMenuHandle<Picker<ConfigOptionPickerDelegate>>>,
     picker: Option<Entity<Picker<ConfigOptionPickerDelegate>>>,
     setting_value: bool,
+    chat_presentation: bool,
 }
 
 impl ConfigOptionSelector {
@@ -356,6 +411,7 @@ impl ConfigOptionSelector {
             picker_handle,
             picker,
             setting_value: false,
+            chat_presentation: false,
         }
     }
 
@@ -436,7 +492,14 @@ impl ConfigOptionSelector {
             display_name,
         )
         .label_size(LabelSize::Small)
-        .color(Color::Muted)
+        .color(if self.chat_presentation {
+            Color::Custom(gpui::rgb(0xe6e2f4).into())
+        } else {
+            Color::Muted
+        })
+        .when(self.chat_presentation, |button| {
+            button.label_size(LabelSize::Default)
+        })
         .end_icon(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted))
         .disabled(self.setting_value)
     }
@@ -1132,6 +1195,7 @@ mod tests {
                 selectors: Vec::new(),
                 agent_server,
                 fs,
+                chat_presentation: false,
                 _refresh_task: Task::ready(()),
             });
 
@@ -1175,6 +1239,7 @@ mod tests {
                 selectors: Vec::new(),
                 agent_server,
                 fs,
+                chat_presentation: false,
                 _refresh_task: Task::ready(()),
             });
 
@@ -1228,6 +1293,7 @@ mod tests {
                 selectors: Vec::new(),
                 agent_server,
                 fs,
+                chat_presentation: false,
                 _refresh_task: Task::ready(()),
             });
 

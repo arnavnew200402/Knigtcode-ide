@@ -3,7 +3,7 @@ mod system_window_tabs;
 
 use gpui::{
     Action, AnyElement, App, Context, Decorations, Entity, Hsla, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, StatefulInteractiveElement, Styled, WeakEntity, Window,
+    MouseButton, ParentElement, Pixels, StatefulInteractiveElement, Styled, WeakEntity, Window,
     WindowButtonLayout, WindowControlArea, div, px,
 };
 use project::DisableAiSettings;
@@ -33,6 +33,7 @@ pub struct PlatformTitleBar {
     system_window_tabs: Entity<SystemWindowTabs>,
     button_layout: Option<WindowButtonLayout>,
     multi_workspace: Option<WeakEntity<MultiWorkspace>>,
+    knightcode_chat: bool,
 }
 
 impl PlatformTitleBar {
@@ -48,6 +49,7 @@ impl PlatformTitleBar {
             system_window_tabs,
             button_layout: None,
             multi_workspace: None,
+            knightcode_chat: false,
         }
     }
 
@@ -60,7 +62,17 @@ impl PlatformTitleBar {
         self.multi_workspace = Some(multi_workspace);
     }
 
+    pub fn set_knightcode_chat(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.knightcode_chat != enabled {
+            self.knightcode_chat = enabled;
+            cx.notify();
+        }
+    }
+
     pub fn title_bar_color(&self, window: &mut Window, cx: &mut Context<Self>) -> Hsla {
+        if self.knightcode_chat {
+            return gpui::rgb(0x090d17).into();
+        }
         if cfg!(any(target_os = "linux", target_os = "freebsd")) {
             if window.is_window_active() && !self.should_move {
                 cx.theme().colors().title_bar_background
@@ -152,8 +164,21 @@ pub fn render_right_window_controls(
     close_action: Box<dyn Action>,
     window: &Window,
 ) -> Option<AnyElement> {
+    render_right_window_controls_with_height(
+        button_layout,
+        close_action,
+        window,
+        platform_title_bar_height(window),
+    )
+}
+
+fn render_right_window_controls_with_height(
+    button_layout: Option<WindowButtonLayout>,
+    close_action: Box<dyn Action>,
+    window: &Window,
+    height: Pixels,
+) -> Option<AnyElement> {
     let decorations = window.window_decorations();
-    let height = platform_title_bar_height(window);
 
     match PlatformStyle::platform() {
         PlatformStyle::Linux => {
@@ -184,13 +209,21 @@ impl Render for PlatformTitleBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let supported_controls = window.window_controls();
         let decorations = window.window_decorations();
-        let height = platform_title_bar_height(window);
+        let height = if self.knightcode_chat {
+            px(70.)
+        } else {
+            platform_title_bar_height(window)
+        };
         let titlebar_color = self.title_bar_color(window, cx);
         let close_action = Box::new(workspace::CloseWindow);
         let children = mem::take(&mut self.children);
 
         let button_layout = self.effective_button_layout(&decorations, cx);
-        let sidebar = self.sidebar_render_state(cx);
+        let sidebar = if self.knightcode_chat {
+            SidebarRenderState::default()
+        } else {
+            self.sidebar_render_state(cx)
+        };
 
         let title_bar = h_flex()
             .window_control_area(WindowControlArea::Drag)
@@ -285,6 +318,11 @@ impl Render for PlatformTitleBar {
             })
             .bg(titlebar_color)
             .content_stretch()
+            .when(self.knightcode_chat, |bar| {
+                bar.items_center()
+                    .border_b_1()
+                    .border_color(gpui::rgb(0x202130))
+            })
             .child(
                 div()
                     .id(self.id.clone())
@@ -304,10 +342,11 @@ impl Render for PlatformTitleBar {
                     let title_bar = title_bar.children(
                         show_right_controls
                             .then(|| {
-                                render_right_window_controls(
+                                render_right_window_controls_with_height(
                                     button_layout,
                                     close_action.as_ref().boxed_clone(),
                                     window,
+                                    height,
                                 )
                             })
                             .flatten(),
@@ -330,7 +369,9 @@ impl Render for PlatformTitleBar {
         v_flex()
             .w_full()
             .child(title_bar)
-            .child(self.system_window_tabs.clone().into_any_element())
+            .when(!self.knightcode_chat, |bar| {
+                bar.child(self.system_window_tabs.clone().into_any_element())
+            })
     }
 }
 

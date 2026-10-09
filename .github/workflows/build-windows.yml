@@ -2,6 +2,11 @@ name: build-windows
 
 on:
   workflow_dispatch:
+    inputs:
+      run_chat_tests:
+        description: Run native Chat session/draft regression tests
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -130,6 +135,23 @@ jobs:
       - name: Build the Windows installer
         shell: pwsh
         run: script/bundle-windows.ps1
+
+      - name: Test native Chat session and draft continuity
+        if: ${{ inputs.run_chat_tests }}
+        shell: pwsh
+        timeout-minutes: 120
+        env:
+          ZED_HEADLESS: "1"
+          ZED_BUNDLE: "true"
+          GGML_NATIVE: "OFF"
+          PENDING_TRACES: "1"
+        run: |
+          cargo --config .cargo/bundle-config.toml test --release `
+            --package agent_ui --features audio --lib --jobs 2 `
+            --target x86_64-pc-windows-msvc test_full_page_chat -- --nocapture
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Native Chat regression tests failed.'
+          }
 
       - name: Upload the Windows installer and executable
         uses: actions/upload-artifact@v4

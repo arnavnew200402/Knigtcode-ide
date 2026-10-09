@@ -28,9 +28,9 @@ use command_palette_hooks::CommandPaletteFilter;
 
 use gpui::{
     Action, Anchor, Animation, AnimationExt, AnyElement, App, Context, Element, Entity, Focusable,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
+    Image, ImageFormat, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
     StatefulInteractiveElement, Styled, Subscription, TaskExt, WeakEntity, Window, actions, div,
-    pulsating_between, rgba,
+    img, pulsating_between, rgba,
 };
 use onboarding_banner::OnboardingBanner;
 use project::{
@@ -233,6 +233,7 @@ fn set_window_layout(layout: WindowLayout, cx: &App) {
 
 pub struct TitleBar {
     platform_titlebar: Entity<PlatformTitleBar>,
+    brand_icon: Arc<Image>,
     project: Entity<Project>,
     user_store: Entity<UserStore>,
     client: Arc<Client>,
@@ -262,6 +263,16 @@ impl Render for TitleBar {
                     titlebar.set_multi_workspace(mw);
                 });
             }
+        }
+
+        let chat = self.knightcode_mode == KnightCodeMode::Chat;
+        self.platform_titlebar
+            .update(cx, |bar, cx| bar.set_knightcode_chat(chat, cx));
+        if chat {
+            let controls = self.render_chat_title_bar(cx).into_any_element();
+            self.platform_titlebar
+                .update(cx, |bar, _| bar.set_children([controls]));
+            return self.platform_titlebar.clone().into_any_element();
         }
 
         let title_bar_settings = *TitleBarSettings::get_global(cx);
@@ -603,6 +614,10 @@ impl TitleBar {
 
         let mut this = Self {
             platform_titlebar,
+            brand_icon: Arc::new(Image::from_bytes(
+                ImageFormat::Png,
+                include_bytes!("../../zed/resources/app-icon.png").to_vec(),
+            )),
             application_menu,
             workspace: workspace.weak_handle(),
             multi_workspace,
@@ -640,6 +655,119 @@ impl TitleBar {
         self.knightcode_operation = operation;
         self.knightcode_operation_busy = busy;
         cx.notify();
+    }
+
+    fn render_chat_title_bar(&self, _cx: &mut Context<Self>) -> impl IntoElement {
+        let mode = self.knightcode_mode;
+        h_flex()
+            .w_full()
+            .h_full()
+            .child(
+                div().w(px(260.)).flex_none().child(
+                    ButtonLike::new("knightcode-chat-brand")
+                        .full_width()
+                        .height(px(70.).into())
+                        .style(ButtonStyle::Transparent)
+                        .tooltip(Tooltip::text("Go to Home"))
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .px_4()
+                                .gap_3()
+                                .child(img(self.brand_icon.clone()).size(px(38.)).flex_none())
+                                .child(
+                                    div()
+                                        .text_size(px(23.))
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .text_color(gpui::rgb(0xf3f0ff))
+                                        .child("KnightCode"),
+                                ),
+                        )
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(ShowHome.boxed_clone(), cx)
+                        }),
+                ),
+            )
+            .child(
+                h_flex().flex_1().min_w_0().justify_center().child(
+                    h_flex()
+                        .w(px(254.))
+                        .p_1()
+                        .gap_1()
+                        .rounded_full()
+                        .border_1()
+                        .border_color(gpui::rgba(0x8c7fc926))
+                        .bg(gpui::rgb(0x080b14))
+                        .children(
+                            [
+                                (
+                                    "full-page-chat",
+                                    "Chat",
+                                    IconName::Chat,
+                                    KnightCodeMode::Chat,
+                                    ShowChat.boxed_clone(),
+                                ),
+                                (
+                                    "full-page-build",
+                                    "Build",
+                                    IconName::Code,
+                                    KnightCodeMode::Build,
+                                    ShowBuild.boxed_clone(),
+                                ),
+                            ]
+                            .into_iter()
+                            .map(
+                                |(id, label, icon, target, action)| {
+                                    div()
+                                        .flex_1()
+                                        .rounded_full()
+                                        .overflow_hidden()
+                                        .when(mode == target, |tab| {
+                                            tab.bg(gpui::linear_gradient(
+                                                120.,
+                                                gpui::linear_color_stop(gpui::rgb(0x6540d7), 0.),
+                                                gpui::linear_color_stop(gpui::rgb(0x40258c), 1.),
+                                            ))
+                                        })
+                                        .child(
+                                            ButtonLike::new(id)
+                                                .full_width()
+                                                .height(px(40.).into())
+                                                .style(ButtonStyle::Transparent)
+                                                .disabled(self.knightcode_operation_busy)
+                                                .child(
+                                                    h_flex()
+                                                        .gap_2()
+                                                        .justify_center()
+                                                        .child(Icon::new(icon).color(
+                                                            Color::Custom(
+                                                                gpui::rgb(0xe1dcf5).into(),
+                                                            ),
+                                                        ))
+                                                        .child(Label::new(label).color(
+                                                            Color::Custom(
+                                                                gpui::rgb(0xe1dcf5).into(),
+                                                            ),
+                                                        )),
+                                                )
+                                                .on_click(move |_, window, cx| {
+                                                    window.dispatch_action(action.boxed_clone(), cx)
+                                                }),
+                                        )
+                                },
+                            ),
+                        ),
+                ),
+            )
+            // Balance the brand against Windows' three native window buttons.
+            .child(div().w(px(152.)).flex_none())
+            .when_some(self.knightcode_operation.clone(), |bar, status| {
+                bar.child(
+                    Label::new(status)
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+            })
     }
 
     fn render_global_search(&self) -> impl IntoElement {

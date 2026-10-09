@@ -439,6 +439,16 @@ impl WorkspaceModes {
     }
 
     fn restore(&mut self, workspace: &mut Workspace, window: &mut Window, cx: &mut App) {
+        // This also runs when an editor is activated outside the mode switch.
+        // Do not leave the full-page Chat layout inside Build's agent dock.
+        if let Some(conversation) = workspace
+            .panel::<AgentPanel>(cx)
+            .and_then(|panel| panel.read(cx).active_conversation_view().cloned())
+        {
+            conversation.update(cx, |conversation, cx| {
+                conversation.set_full_page_chat(false, window, cx);
+            });
+        }
         if let Some(docks) = self.build_docks.take() {
             let workspace_handle = self.workspace.clone();
             window.defer(cx, move |window, cx| {
@@ -1146,6 +1156,14 @@ impl KnightCodePage {
             .border_r_1()
             .border_color(rgba(0xb4a0ff24))
             .bg(rgba(0x08061cd9))
+            .when(page == Page::Chat, |navigation| {
+                navigation
+                    .w(px(260.))
+                    .p_4()
+                    .gap_3()
+                    .bg(rgb(0x090d17))
+                    .border_color(rgb(0x202130))
+            })
             .when(page != Page::Chat, |navigation| {
                 navigation
                     .children(
@@ -1214,15 +1232,18 @@ impl KnightCodePage {
             .when(page == Page::Chat, |navigation| {
                 navigation.child(self.render_history(cx))
             })
-            .child(
-                v_flex()
-                    .p_3()
-                    .gap_1()
-                    .child(
-                        Label::new("Ideas into Impact.").color(Color::Custom(rgb(0xb19bff).into())),
-                    )
-                    .child(div().h(px(2.)).w_8().bg(rgb(0x8b7cff))),
-            )
+            .when(page != Page::Chat, |navigation| {
+                navigation.child(
+                    v_flex()
+                        .p_3()
+                        .gap_1()
+                        .child(
+                            Label::new("Ideas into Impact.")
+                                .color(Color::Custom(rgb(0xb19bff).into())),
+                        )
+                        .child(div().h(px(2.)).w_8().bg(rgb(0x8b7cff))),
+                )
+            })
     }
 
     fn render_history(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1245,10 +1266,13 @@ impl KnightCodePage {
                     .filter(|metadata| {
                         !metadata.archived
                             && metadata.matches_remote_connection(remote_connection.as_ref())
-                            && work_dirs
-                                .as_ref()
-                                .is_some_and(|paths| metadata.folder_paths() == paths)
-                            && metadata.display_title().to_lowercase().contains(&query)
+                            // Scratch Chat is the global conversation surface.
+                            // A project-backed page keeps its project-specific history.
+                            && work_dirs.as_ref().is_some_and(|paths| {
+                                paths.is_empty() || metadata.folder_paths() == paths
+                            })
+                            && (metadata.display_title().to_lowercase().contains(&query)
+                                || (metadata.is_draft() && "new chat".contains(&query)))
                     })
                     .cloned()
                     .collect::<Vec<_>>()
@@ -1269,7 +1293,7 @@ impl KnightCodePage {
             let group = match age {
                 i64::MIN..=0 => "Today",
                 1 => "Yesterday",
-                2..=6 => "This week",
+                2..=6 => "This Week",
                 _ => "Earlier",
             };
             if last_group != Some(group) {
@@ -1283,63 +1307,151 @@ impl KnightCodePage {
                 last_group = Some(group);
             }
             let selected = active_thread == Some(metadata.thread_id);
-            let title = metadata.display_title();
+            let title = if metadata.is_draft() {
+                "New Chat".into()
+            } else {
+                metadata.display_title()
+            };
             entries.push(
-                Button::new(metadata.thread_id.to_key_string(), title)
-                    .full_width()
-                    .toggle_state(selected)
-                    .label_size(LabelSize::Small)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        if let Some(panel) = &this.panel {
-                            panel.update(cx, |panel, cx| {
-                                panel.load_agent_thread(
-                                    Agent::from(metadata.agent_id.clone()),
-                                    metadata.thread_id,
-                                    Some(metadata.folder_paths().clone()),
-                                    metadata.title(),
-                                    true,
-                                    AgentThreadSource::Sidebar,
-                                    window,
-                                    cx,
-                                )
-                            });
-                        }
-                    }))
+                div()
+                    .w_full()
+                    .rounded_lg()
+                    .overflow_hidden()
+                    .when(selected, |row| row.bg(rgba(0x6b4bc630)))
+                    .child(
+                        ButtonLike::new(metadata.thread_id.to_key_string())
+                            .full_width()
+                            .height(px(40.).into())
+                            .style(ButtonStyle::Transparent)
+                            .aria_label(title.clone())
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .min_w_0()
+                                    .px_2()
+                                    .gap_3()
+                                    .child(
+                                        Icon::new(IconName::Chat)
+                                            .size(IconSize::Medium)
+                                            .color(Color::Custom(rgb(0xb8b5d3).into())),
+                                    )
+                                    .child(div().flex_1().min_w_0().text_left().child(
+                                        Label::new(title).truncate().color(Color::Custom(
+                                            rgb(if selected { 0xd5c8ff } else { 0xc5c0dc }).into(),
+                                        )),
+                                    )),
+                            )
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if let Some(panel) = &this.panel {
+                                    panel.update(cx, |panel, cx| {
+                                        panel.load_agent_thread(
+                                            Agent::from(metadata.agent_id.clone()),
+                                            metadata.thread_id,
+                                            Some(metadata.folder_paths().clone()),
+                                            metadata.title(),
+                                            true,
+                                            AgentThreadSource::Sidebar,
+                                            window,
+                                            cx,
+                                        )
+                                    });
+                                }
+                            })),
+                    )
                     .into_any_element(),
             );
         }
         v_flex()
-            .mt_3()
-            .gap_2()
+            .gap_3()
             .min_h_0()
             .flex_1()
             .child(
-                Button::new("new-chat", "New Chat")
-                    .full_width()
-                    .start_icon(Icon::new(IconName::Plus))
-                    .on_click(cx.listener(|this, _, window, cx| this.new_chat(window, cx))),
+                div()
+                    .w_full()
+                    .rounded_lg()
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(rgb(0x493090))
+                    .bg(linear_gradient(
+                        110.,
+                        linear_color_stop(rgb(0x302074), 0.),
+                        linear_color_stop(rgb(0x211659), 1.),
+                    ))
+                    .child(
+                        ButtonLike::new("new-chat")
+                            .aria_label("New Chat")
+                            .full_width()
+                            .height(px(56.).into())
+                            .style(ButtonStyle::Transparent)
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .px_3()
+                                    .gap_3()
+                                    .child(
+                                        Icon::new(IconName::Plus)
+                                            .size(IconSize::Medium)
+                                            .color(Color::Custom(rgb(0xe6e0ff).into())),
+                                    )
+                                    .child(
+                                        Label::new("New Chat")
+                                            .color(Color::Custom(rgb(0xf5f1ff).into())),
+                                    ),
+                            )
+                            .on_click(cx.listener(|this, _, window, cx| this.new_chat(window, cx))),
+                    ),
             )
             .child(
-                div()
-                    .p_2()
+                h_flex()
+                    .h(px(48.))
+                    .px_3()
+                    .gap_2()
                     .rounded_lg()
                     .border_1()
-                    .border_color(rgba(0x8c78ff29))
-                    .bg(rgba(0x121033bb))
-                    .child(self.search.clone()),
+                    .border_color(rgb(0x202432))
+                    .bg(rgb(0x10141e))
+                    .child(
+                        Icon::new(IconName::MagnifyingGlass)
+                            .color(Color::Custom(rgb(0xb8b5d3).into())),
+                    )
+                    .child(
+                        div().min_w_0().flex_1().child(editor::EditorElement::new(
+                            &self.search,
+                            editor::EditorStyle {
+                                background: rgb(0x10141e).into(),
+                                local_player: cx.theme().players().local(),
+                                text: gpui::TextStyle {
+                                    color: rgb(0xddd8ee).into(),
+                                    font_family: theme_settings::ThemeSettings::get_global(cx)
+                                        .agent_ui_font_family()
+                                        .clone(),
+                                    font_size: theme_settings::ThemeSettings::get_global(cx)
+                                        .agent_ui_font_size(cx)
+                                        .into(),
+                                    ..Default::default()
+                                },
+                                syntax: cx.theme().syntax().clone(),
+                                ..Default::default()
+                            },
+                        )),
+                    ),
             )
             .child(
                 v_flex()
                     .id("chat-history")
                     .min_h_0()
                     .flex_1()
-                    .gap_1()
+                    .gap_2()
                     .overflow_y_scroll()
                     .when(entries.is_empty(), |history| {
                         history.child(
-                            Label::new("No matching conversations")
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
+                            Label::new(if query.is_empty() {
+                                "Your conversations will appear here"
+                            } else {
+                                "No matching conversations"
+                            })
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
                         )
                     })
                     .children(entries),
@@ -1457,7 +1569,7 @@ impl KnightCodePage {
                 }))))
     }
 
-    fn render_chat(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_chat(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_active = self.workspace.upgrade().is_some_and(|workspace| {
             workspace
                 .read(cx)
@@ -1471,14 +1583,18 @@ impl KnightCodePage {
         let conversation = (is_active && !panel_visible)
             .then(|| self.conversation_view(cx))
             .flatten();
+        if let Some(conversation) = &conversation {
+            conversation.update(cx, |conversation, cx| {
+                conversation.set_full_page_chat(true, window, cx);
+            });
+        }
         let show_loading = is_active && !panel_visible && conversation.is_none();
         let theme_settings = theme_settings::ThemeSettings::get_global(cx);
         v_flex()
             .size_full()
             .min_h_0()
             .min_w_0()
-            .p_6()
-            .gap_3()
+            .bg(rgb(0x070a13))
             .when_some(self.chat_error.clone(), |stage, error| {
                 stage.child(Label::new(error).color(Color::Error))
             })
@@ -1602,7 +1718,7 @@ impl Render for KnightCodePage {
         }
         let content = match self.page {
             Page::Home => self.render_home(cx).into_any_element(),
-            Page::Chat => self.render_chat(cx).into_any_element(),
+            Page::Chat => self.render_chat(window, cx).into_any_element(),
             Page::Models | Page::Account => {
                 self.render_configuration(window, cx).into_any_element()
             }
@@ -1670,7 +1786,9 @@ impl Render for KnightCodePage {
                     }
                 },
             ))
-            .child(scenic_background())
+            .when(self.page != Page::Chat, |page| {
+                page.child(scenic_background())
+            })
             .child(self.render_navigation(cx))
             .child(
                 div()

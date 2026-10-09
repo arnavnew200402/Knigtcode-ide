@@ -621,6 +621,8 @@ pub struct ThreadView {
     pub in_flight_prompt: Option<Vec<acp::ContentBlock>>,
     pub _subscriptions: Vec<Subscription>,
     pub message_editor: Entity<MessageEditor>,
+    full_page_chat: bool,
+    chat_artwork: Option<super::chat_presentation::ChatArtwork>,
     knightcode_tasks: Option<Entity<crate::knightcode_tasks::KnightCodeTasks>>,
     voice_input: Entity<voice_input::VoiceInput>,
     pub add_context_menu_handle: PopoverMenuHandle<ContextMenu>,
@@ -1075,6 +1077,8 @@ impl ThreadView {
             hovered_edited_file_buttons: None,
             in_flight_prompt: None,
             message_editor,
+            full_page_chat: false,
+            chat_artwork: None,
             knightcode_tasks,
             voice_input,
             add_context_menu_handle: PopoverMenuHandle::default(),
@@ -4371,6 +4375,298 @@ impl ThreadView {
         )
     }
 
+    pub(crate) fn set_full_page_chat(
+        &mut self,
+        enabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let enabled = enabled && !self.is_subagent();
+        if self.full_page_chat == enabled {
+            return;
+        }
+        self.full_page_chat = enabled;
+        if enabled && self.chat_artwork.is_none() {
+            self.chat_artwork = Some(super::chat_presentation::ChatArtwork::new());
+        }
+        self.message_editor.update(cx, |editor, cx| {
+            editor.set_full_page_chat(enabled, window, cx);
+            editor.set_mode(
+                editor::EditorMode::AutoHeight {
+                    min_lines: if enabled {
+                        2
+                    } else {
+                        AgentSettings::get_global(cx).message_editor_min_lines
+                    },
+                    max_lines: Some(if enabled {
+                        8
+                    } else {
+                        AgentSettings::get_global(cx).set_message_editor_max_lines()
+                    }),
+                },
+                cx,
+            );
+            if !enabled {
+                editor.set_placeholder_text(
+                    &placeholder_text(
+                        &self.agent_display_name,
+                        self.session_capabilities.read().has_slash_completions(),
+                    ),
+                    window,
+                    cx,
+                );
+            }
+        });
+        self.voice_input
+            .update(cx, |voice, cx| voice.set_compact(enabled, cx));
+        if let Some(config) = &self.config_options_view {
+            config.update(cx, |config, cx| config.set_chat_presentation(enabled, cx));
+        }
+        cx.notify();
+    }
+
+    fn chat_display_name(&self, cx: &App) -> Option<String> {
+        let account_name = self
+            .workspace
+            .upgrade()
+            .and_then(|workspace| {
+                workspace
+                    .read(cx)
+                    .app_state()
+                    .user_store
+                    .read(cx)
+                    .current_user()
+            })
+            .and_then(|user| {
+                user.name
+                    .clone()
+                    .or_else(|| Some(user.username.to_string()))
+            });
+        account_name
+            .or_else(|| std::env::var("USERNAME").ok())
+            .or_else(|| std::env::var("USER").ok())
+            .and_then(|name| {
+                name.split([' ', '_', '-', '@'])
+                    .find(|part| !part.is_empty())
+                    .map(str::to_owned)
+            })
+    }
+
+    fn render_chat_composer(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let capabilities = self.session_capabilities.read();
+        let supports_images = capabilities.supports_images();
+        let supports_context = capabilities.supports_embedded_context();
+        drop(capabilities);
+        let has_terminal_selection = self
+            .workspace
+            .upgrade()
+            .and_then(|workspace| workspace.read(cx).panel::<TerminalPanel>(cx))
+            .is_some_and(|panel| !panel.read(cx).terminal_selections(cx).is_empty());
+        let circular = |child: AnyElement| {
+            h_flex()
+                .size(px(48.))
+                .flex_none()
+                .justify_center()
+                .rounded_full()
+                .border_1()
+                .border_color(gpui::rgba(0x82779930))
+                .child(child)
+        };
+        v_flex()
+            .relative()
+            .w_full()
+            .flex_none()
+            .px_8()
+            .pb_8()
+            .pt_3()
+            .on_action(cx.listener(Self::handle_message_editor_move_up))
+            .child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .p_4()
+                    .gap_3()
+                    .rounded_2xl()
+                    .border_1()
+                    .border_color(gpui::rgba(0xa58bff99))
+                    .bg(gpui::rgb(0x111625))
+                    .child(
+                        div()
+                            .w_full()
+                            .min_h_0()
+                            .px_1()
+                            .child(self.message_editor.clone()),
+                    )
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .flex_wrap()
+                            .gap_3()
+                            .justify_between()
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .child(circular(
+                                        self.render_add_context_button(cx).into_any_element(),
+                                    ))
+                                    .child(circular(
+                                        ButtonLike::new("chat-web-context")
+                                            .full_width()
+                                            .height(px(48.).into())
+                                            .style(ButtonStyle::Transparent)
+                                            .disabled(!supports_context)
+                                            .tooltip(Tooltip::text(
+                                                "Add a web page as context (@fetch)",
+                                            ))
+                                            .child(
+                                                Icon::new(IconName::Public)
+                                                    .size(IconSize::Medium)
+                                                    .color(Color::Custom(
+                                                        gpui::rgb(0xbab4d5).into(),
+                                                    )),
+                                            )
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.message_editor
+                                                    .focus_handle(cx)
+                                                    .focus(window, cx);
+                                                this.message_editor.update(cx, |editor, cx| {
+                                                    editor.insert_context_type("fetch", window, cx)
+                                                });
+                                            }))
+                                            .into_any_element(),
+                                    ))
+                                    .child(circular(
+                                        ButtonLike::new("chat-image-context")
+                                            .full_width()
+                                            .height(px(48.).into())
+                                            .style(ButtonStyle::Transparent)
+                                            .disabled(!supports_images)
+                                            .tooltip(Tooltip::text("Attach images"))
+                                            .child(
+                                                Icon::new(IconName::Image)
+                                                    .size(IconSize::Medium)
+                                                    .color(Color::Custom(
+                                                        gpui::rgb(0xbab4d5).into(),
+                                                    )),
+                                            )
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.message_editor.update(cx, |editor, cx| {
+                                                    editor.add_images_from_picker(window, cx)
+                                                });
+                                            }))
+                                            .into_any_element(),
+                                    ))
+                                    .child(circular(
+                                        ButtonLike::new("chat-terminal-context")
+                                            .full_width()
+                                            .height(px(48.).into())
+                                            .style(ButtonStyle::Transparent)
+                                            .disabled(!supports_context || !has_terminal_selection)
+                                            .tooltip(Tooltip::text(
+                                                "Attach terminal output selected in Build",
+                                            ))
+                                            .child(
+                                                Icon::new(IconName::Terminal)
+                                                    .size(IconSize::Medium)
+                                                    .color(Color::Custom(
+                                                        gpui::rgb(0xbab4d5).into(),
+                                                    )),
+                                            )
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.attach_chat_terminal_selection(window, cx);
+                                            }))
+                                            .into_any_element(),
+                                    )),
+                            )
+                            .child(
+                                h_flex()
+                                    .min_w_0()
+                                    .flex_wrap()
+                                    .gap_3()
+                                    .map(|controls| match self.config_options_view.clone() {
+                                        Some(config) => controls.child(config),
+                                        None => controls
+                                            .children(self.model_selector.clone())
+                                            .children(self.render_thinking_control(cx)),
+                                    })
+                                    .child(self.voice_input.clone())
+                                    .child(self.render_chat_send_button(cx)),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn attach_chat_terminal_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selection = self
+            .workspace
+            .upgrade()
+            .and_then(|workspace| workspace.read(cx).panel::<TerminalPanel>(cx))
+            .map(|panel| panel.read(cx).terminal_selections(cx))
+            .unwrap_or_default();
+        if !selection.is_empty() {
+            self.message_editor.update(cx, |editor, cx| {
+                editor.insert_selections(AgentContextSelection::Terminal(selection), window, cx);
+            });
+            self.message_editor.focus_handle(cx).focus(window, cx);
+        }
+    }
+
+    fn render_chat_send_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let empty = self.message_editor.read(cx).is_empty(cx);
+        let generating = self.thread.read(cx).status() != ThreadStatus::Idle;
+        let stopping = generating && empty;
+        let disabled = self.is_loading_contents || (empty && !generating);
+        let icon = if self.is_loading_contents {
+            IconName::LoadCircle
+        } else if stopping {
+            IconName::Stop
+        } else if generating {
+            IconName::QueueMessage
+        } else {
+            IconName::ArrowUp
+        };
+        div()
+            .size(px(52.))
+            .flex_none()
+            .rounded_full()
+            .overflow_hidden()
+            .bg(linear_gradient(
+                135.,
+                linear_color_stop(gpui::rgb(0xb194ff), 0.),
+                linear_color_stop(gpui::rgb(0x7950e8), 1.),
+            ))
+            .child(
+                ButtonLike::new("chat-send-message")
+                    .full_width()
+                    .height(px(52.).into())
+                    .style(ButtonStyle::Transparent)
+                    .disabled(disabled)
+                    .tooltip(Tooltip::text(if self.is_loading_contents {
+                        "Loading attached context…"
+                    } else if stopping {
+                        "Stop generation"
+                    } else if generating {
+                        "Queue message"
+                    } else {
+                        "Send message"
+                    }))
+                    .child(
+                        Icon::new(icon)
+                            .size(IconSize::Medium)
+                            .color(Color::Custom(gpui::rgb(0x100b29).into())),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if stopping {
+                            this.cancel_generation(cx)
+                        } else {
+                            this.send(window, cx)
+                        }
+                    })),
+            )
+    }
+
     pub(crate) fn render_message_editor(
         &mut self,
         window: &mut Window,
@@ -4378,6 +4674,10 @@ impl ThreadView {
     ) -> AnyElement {
         if self.is_subagent() {
             return div().into_any_element();
+        }
+
+        if self.full_page_chat {
+            return self.render_chat_composer(cx);
         }
 
         let focus_handle = self.message_editor.focus_handle(cx);
@@ -5525,7 +5825,16 @@ impl ThreadView {
         PopoverMenu::new("add-context-menu")
             .trigger_with_tooltip(
                 IconButton::new("add-context", IconName::Plus)
-                    .icon_size(IconSize::Small)
+                    .size(if self.full_page_chat {
+                        ButtonSize::Large
+                    } else {
+                        ButtonSize::Default
+                    })
+                    .icon_size(if self.full_page_chat {
+                        IconSize::Medium
+                    } else {
+                        IconSize::Small
+                    })
                     .icon_color(Color::Muted),
                 {
                     move |_window, cx| {
@@ -5583,6 +5892,8 @@ impl ThreadView {
             .is_some_and(|panel| !panel.read(cx).terminal_selections(cx).is_empty());
 
         let has_selection = has_editor_selection || has_terminal_selection;
+        let full_page_chat = self.full_page_chat;
+        let thread_view = cx.weak_entity();
 
         ContextMenu::build(window, cx, move |menu, _window, _cx| {
             menu.key_context("AddContextMenu")
@@ -5668,10 +5979,18 @@ impl ThreadView {
                         .disabled(!has_selection)
                         .handler({
                             move |window, cx| {
-                                window.dispatch_action(
-                                    zed_actions::agent::AddSelectionToThread.boxed_clone(),
-                                    cx,
-                                );
+                                if full_page_chat {
+                                    thread_view
+                                        .update(cx, |view, cx| {
+                                            view.attach_chat_terminal_selection(window, cx);
+                                        })
+                                        .log_err();
+                                } else {
+                                    window.dispatch_action(
+                                        zed_actions::agent::AddSelectionToThread.boxed_clone(),
+                                        cx,
+                                    );
+                                }
                             }
                         }),
                 )
@@ -12209,12 +12528,29 @@ impl Render for ThreadView {
                         .child(self.render_entries(cx))
                         .vertical_scrollbar_for(&list_state, window, cx)
                         .into_any()
+                } else if let Some(artwork) = &self.chat_artwork
+                    && self.full_page_chat
+                {
+                    this.flex_1()
+                        .size_full()
+                        .min_h_0()
+                        .child(artwork.welcome(self.chat_display_name(cx), window))
+                        .into_any_element()
                 } else {
                     this.into_any()
                 }
             });
 
         v_flex()
+            .relative()
+            .min_h_0()
+            .min_w_0()
+            .when(self.full_page_chat, |view| {
+                view.overflow_hidden()
+                    .when_some(self.chat_artwork.as_ref(), |view, artwork| {
+                        view.child(artwork.background())
+                    })
+            })
             .key_context("AcpThread")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(|this, _: &menu::Cancel, _, cx| {

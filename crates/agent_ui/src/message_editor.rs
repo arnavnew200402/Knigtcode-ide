@@ -207,6 +207,7 @@ pub struct MessageEditor {
     local_commands: SharedLocalCommands,
     agent_id: AgentId,
     thread_store: Option<Entity<ThreadStore>>,
+    full_page_chat: bool,
     _subscriptions: Vec<Subscription>,
     _parse_slash_command_task: Task<()>,
 }
@@ -609,6 +610,7 @@ impl MessageEditor {
             local_commands,
             agent_id,
             thread_store,
+            full_page_chat: false,
             _subscriptions: subscriptions,
             _parse_slash_command_task: Task::ready(()),
         }
@@ -1997,12 +1999,30 @@ impl MessageEditor {
         Ok(())
     }
 
+    pub(crate) fn set_full_page_chat(
+        &mut self,
+        enabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.full_page_chat = enabled;
+        if enabled {
+            self.set_placeholder_text("Ask anything…", window, cx);
+        }
+        cx.notify();
+    }
+
     pub fn set_placeholder_text(
         &mut self,
         placeholder: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let placeholder = if self.full_page_chat {
+            "Ask anything…"
+        } else {
+            placeholder
+        };
         self.editor.update(cx, |editor, cx| {
             editor.set_placeholder_text(placeholder, window, cx);
         });
@@ -2124,11 +2144,23 @@ impl Render for MessageEditor {
                 let settings = ThemeSettings::get_global(cx);
 
                 let text_style = TextStyle {
-                    color: cx.theme().colors().text,
-                    font_family: settings.agent_buffer_font_family().clone(),
+                    color: if self.full_page_chat {
+                        gpui::rgb(0xe9e7f7).into()
+                    } else {
+                        cx.theme().colors().text
+                    },
+                    font_family: if self.full_page_chat {
+                        settings.agent_ui_font_family().clone()
+                    } else {
+                        settings.agent_buffer_font_family().clone()
+                    },
                     font_fallbacks: settings.buffer_font.fallbacks.clone(),
                     font_features: settings.buffer_font.features.clone(),
-                    font_size: settings.agent_buffer_font_size(cx).into(),
+                    font_size: if self.full_page_chat {
+                        settings.agent_ui_font_size(cx).into()
+                    } else {
+                        settings.agent_buffer_font_size(cx).into()
+                    },
                     font_weight: settings.buffer_font.weight,
                     line_height: relative(settings.buffer_line_height.value()),
                     ..Default::default()
@@ -2137,7 +2169,11 @@ impl Render for MessageEditor {
                 EditorElement::new(
                     &self.editor,
                     EditorStyle {
-                        background: cx.theme().colors().editor_background,
+                        background: if self.full_page_chat {
+                            gpui::rgb(0x111625).into()
+                        } else {
+                            cx.theme().colors().editor_background
+                        },
                         local_player: cx.theme().players().local(),
                         text: text_style,
                         syntax: cx.theme().syntax().clone(),
