@@ -461,7 +461,7 @@ impl WorkspaceModes {
         window: &mut Window,
         cx: &mut App,
     ) {
-        workspace.set_knightcode_chat(page == Page::Chat, cx);
+        workspace.set_knightcode_front_page(true, cx);
         if let Some(previous) = self.previous_build_theme.take() {
             // The workbench theme is temporary; never rewrite the user's
             // persisted theme or undo a theme they selected while in Build.
@@ -564,7 +564,7 @@ impl WorkspaceModes {
     }
 
     fn restore(&mut self, workspace: &mut Workspace, window: &mut Window, cx: &mut App) {
-        workspace.set_knightcode_chat(false, cx);
+        workspace.set_knightcode_front_page(false, cx);
         // This also runs when an editor is activated outside the mode switch.
         // Do not leave the full-page Chat layout inside Build's agent dock.
         if let Some(conversation) = workspace
@@ -1747,11 +1747,6 @@ impl KnightCodePage {
                 .when(self.recent.is_none() && self.recent_error.is_none(), |recent| recent.child(div().p_3().child(Label::new("Loading recent projects…").color(Color::Muted))))
                 .when(self.recent.as_ref().is_some_and(Vec::is_empty), |recent| recent.child(div().p_3().child(Label::new("Your recent projects will appear here after you open a folder.").color(Color::Muted))))
                 .children(recent_cards))
-            .child(h_flex().gap_2()
-                .child(Button::new("refresh-recents", "Refresh Recent Projects").on_click(cx.listener(|this, _, _, cx| this.refresh_recent(cx))))
-                .child(Button::new("clone-project", "Clone Repository…").on_click(cx.listener(|this, _, window, cx| {
-                    git_ui::clone::clone_and_open(SharedString::default(), this.workspace.clone(), window, cx, Arc::new(|_, _, _| {}));
-                }))))
     }
 
     fn render_chat(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
