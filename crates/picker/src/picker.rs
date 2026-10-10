@@ -353,6 +353,12 @@ pub trait PickerDelegate: Sized + 'static {
         None
     }
 
+    /// Optional presentation-only chrome. Defaults leave every existing picker
+    /// unchanged; delegates can style a surface without changing global themes.
+    fn style_container(&self, container: Div, _cx: &App) -> Div {
+        container
+    }
+
     /// Overrides the search bar entirely. Most delegates should return `None`
     /// to get the picker-rendered default (which includes
     /// [`Self::searchbar_trailer`] and the multi-select toggle); override for

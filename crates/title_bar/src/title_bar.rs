@@ -1,4 +1,5 @@
 mod application_menu;
+mod chat_mode_switch;
 pub mod collab;
 mod onboarding_banner;
 mod plan_chip;
@@ -867,75 +868,11 @@ impl TitleBar {
                 ),
             )
             .child(
-                h_flex().flex_1().min_w_0().justify_center().child(
-                    h_flex()
-                        .w(px(224.))
-                        .p_1()
-                        .gap_1()
-                        .rounded_full()
-                        .border_1()
-                        .border_color(gpui::rgba(0x8c7fc926))
-                        .bg(gpui::rgb(0x080b14))
-                        .children(
-                            [
-                                (
-                                    "full-page-chat",
-                                    "Chat",
-                                    IconName::Chat,
-                                    KnightCodeMode::Chat,
-                                    ShowChat.boxed_clone(),
-                                ),
-                                (
-                                    "full-page-build",
-                                    "Build",
-                                    IconName::Code,
-                                    KnightCodeMode::Build,
-                                    ShowBuild.boxed_clone(),
-                                ),
-                            ]
-                            .into_iter()
-                            .map(
-                                |(id, label, icon, target, action)| {
-                                    div()
-                                        .flex_1()
-                                        .rounded_full()
-                                        .overflow_hidden()
-                                        .when(mode == target, |tab| {
-                                            tab.bg(gpui::linear_gradient(
-                                                120.,
-                                                gpui::linear_color_stop(gpui::rgb(0x6540d7), 0.),
-                                                gpui::linear_color_stop(gpui::rgb(0x40258c), 1.),
-                                            ))
-                                        })
-                                        .child(
-                                            ButtonLike::new(id)
-                                                .full_width()
-                                                .height(px(32.).into())
-                                                .style(ButtonStyle::Transparent)
-                                                .disabled(self.knightcode_operation_busy)
-                                                .child(
-                                                    h_flex()
-                                                        .gap_2()
-                                                        .justify_center()
-                                                        .child(Icon::new(icon).color(
-                                                            Color::Custom(
-                                                                gpui::rgb(0xe1dcf5).into(),
-                                                            ),
-                                                        ))
-                                                        .child(Label::new(label).color(
-                                                            Color::Custom(
-                                                                gpui::rgb(0xe1dcf5).into(),
-                                                            ),
-                                                        )),
-                                                )
-                                                .on_click(move |_, window, cx| {
-                                                    window.dispatch_action(action.boxed_clone(), cx)
-                                                }),
-                                        )
-                                },
-                            ),
-                        ),
-                ),
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .justify_center()
+                    .child(chat_mode_switch::render(mode)),
             )
             // Balance the brand against Windows' three native window buttons.
             .child(div().w(px(152.)).flex_none())
@@ -1142,6 +1079,7 @@ impl TitleBar {
             .gap_0p5()
             .px_1()
             .rounded_full()
+            .occlude()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .children(
                 mode_entries
@@ -1150,7 +1088,6 @@ impl TitleBar {
                         Button::new(id, label)
                             .label_size(LabelSize::Small)
                             .toggle_state(mode == entry_mode)
-                            .disabled(self.knightcode_operation_busy)
                             .selected_label_color(Color::Custom(
                                 if entry_mode == KnightCodeMode::Build {
                                     gpui::rgb(0xe6a47a).into()

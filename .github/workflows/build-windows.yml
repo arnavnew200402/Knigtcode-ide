@@ -109,6 +109,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native Build source/artwork validation failed.' }
           node script/check-home-design.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Native Home source/artwork validation failed.' }
+          node script/test-home-design-check.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Home validator LF/CRLF regression tests failed.' }
           # Pure sizing tests cover logical pixels/DPI without another large test binary.
           $homeTests = Join-Path $env:RUNNER_TEMP 'knightcode-home-layout-tests.exe'
           rustc --edition 2024 --test crates/knightcode_onboarding/src/workspace_modes/home_layout.rs -o $homeTests
@@ -122,6 +124,10 @@ jobs:
             crates/knightcode_onboarding/src/workspace_modes/home_presentation.rs `
             crates/knightcode_onboarding/src/workspace_modes/home_layout.rs `
             crates/title_bar/src/title_bar.rs `
+            crates/title_bar/src/chat_mode_switch.rs `
+            crates/recent_projects/src/recent_projects.rs `
+            crates/picker/src/picker.rs `
+            crates/picker/src/render.rs `
             crates/platform_title_bar/src/platform_title_bar.rs `
             crates/agent_ui/src/conversation_view/thread_view/build_presentation.rs
           if ($LASTEXITCODE -ne 0) { throw 'Native Build formatting failed.' }
@@ -215,6 +221,21 @@ jobs:
             --package workspace --lib --jobs 2 `
             --target x86_64-pc-windows-msvc test_chat_ -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Chat status bar/tab predicate regression tests failed.' }
+
+      - name: Test native Chat and Build title-bar clicks
+        if: ${{ inputs.run_chat_tests }}
+        shell: pwsh
+        timeout-minutes: 120
+        env:
+          ZED_HEADLESS: "1"
+          ZED_BUNDLE: "true"
+          GGML_NATIVE: "OFF"
+          PENDING_TRACES: "1"
+        run: |
+          cargo --config .cargo/bundle-config.toml test --release `
+            --package title_bar --lib --jobs 2 `
+            --target x86_64-pc-windows-msvc test_knightcode_mode_switch -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Native title-bar mode switching regression tests failed.' }
 
       - name: Test native Build session and draft continuity
         if: ${{ inputs.run_build_tests }}

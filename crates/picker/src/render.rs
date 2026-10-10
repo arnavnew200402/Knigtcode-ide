@@ -71,6 +71,7 @@ impl<D: PickerDelegate> Render for Picker<D> {
         let has_preview = self.preview.is_some();
         let content = div()
             .when(self.draws_own_container(), |this| this.elevation_3(cx))
+            .map(|container| self.delegate.style_container(container, cx))
             .when(has_preview, |this| this.overflow_hidden())
             .child(content);
 

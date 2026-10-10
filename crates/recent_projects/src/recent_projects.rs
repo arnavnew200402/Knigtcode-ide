@@ -697,6 +697,11 @@ impl RecentProjects {
         let weak = cx.entity().downgrade();
         let open_folders = get_open_folders(workspace, cx);
         let fs = Some(workspace.app_state().fs.clone());
+        // Snapshot the originating page before modal focus replaces it.
+        let home_palette = window
+            .context_stack()
+            .iter()
+            .any(|context| context.contains("KnightCodeHome"));
 
         let create_new_window = create_new_window.unwrap_or_else(|| default_open_in_new_window(cx));
 
@@ -708,7 +713,8 @@ impl RecentProjects {
                 open_folders,
                 window_project_groups,
                 ProjectPickerStyle::Modal,
-            );
+            )
+            .with_home_palette(home_palette);
 
             Self::new(delegate, fs, 42., window, cx)
         })
@@ -862,6 +868,7 @@ pub struct RecentProjectsDelegate {
     snap_selection_to_first_non_header_match: bool,
     focus_handle: FocusHandle,
     style: ProjectPickerStyle,
+    home_palette: bool,
     actions_menu_handle: PopoverMenuHandle<ContextMenu>,
 }
 
@@ -887,8 +894,59 @@ impl RecentProjectsDelegate {
             snap_selection_to_first_non_header_match: true,
             focus_handle,
             style,
+            home_palette: false,
             actions_menu_handle: PopoverMenuHandle::default(),
         }
+    }
+
+    fn with_home_palette(mut self, enabled: bool) -> Self {
+        self.home_palette = enabled;
+        self
+    }
+
+    fn footer_button(&self, button: Button) -> Button {
+        if self.home_palette {
+            button.color(Color::Custom(gpui::rgb(0xf0f6ff).into()))
+        } else {
+            button
+        }
+    }
+
+    fn project_match_view(
+        &self,
+        highlighted: HighlightedMatchWithPaths,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        if !self.home_palette {
+            return highlighted.render(window, cx).into_any_element();
+        }
+        let text = Color::Custom(gpui::rgb(0xf0f6ff).into());
+        let muted = Color::Custom(gpui::rgb(0x9ebfe0).into());
+        v_flex()
+            .min_w_0()
+            .child(
+                h_flex()
+                    .gap_1()
+                    .child(highlighted.match_label.color(text))
+                    .when_some(highlighted.prefix, |row, prefix| {
+                        row.child(Label::new(format!("({prefix})")).color(muted))
+                    })
+                    .when(highlighted.active, |row| {
+                        row.child(
+                            Icon::new(IconName::Check)
+                                .size(IconSize::Small)
+                                .color(Color::Custom(gpui::rgb(0x75c8ff).into())),
+                        )
+                    }),
+            )
+            .children(highlighted.paths.into_iter().map(|path| {
+                HighlightedLabel::new(path.text, path.highlight_positions)
+                    .single_line()
+                    .size(LabelSize::Small)
+                    .color(muted)
+            }))
+            .into_any_element()
     }
 
     pub fn set_workspaces(&mut self, workspaces: Vec<RecentWorkspace>) {
@@ -931,6 +989,61 @@ impl PickerDelegate for RecentProjectsDelegate {
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
         "Search projects…".into()
+    }
+
+    fn style_container(&self, container: Div, _cx: &App) -> Div {
+        if self.home_palette {
+            container
+                .bg(gpui::rgb(0x061326))
+                .border_color(gpui::rgb(0x285985))
+                .rounded_lg()
+                .overflow_hidden()
+        } else {
+            container
+        }
+    }
+
+    fn render_editor(
+        &self,
+        editor: &Arc<dyn picker::ErasedEditor>,
+        _window: &mut Window,
+        cx: &mut Context<Picker<Self>>,
+    ) -> Option<Div> {
+        if !self.home_palette {
+            return None;
+        }
+        let editor = editor.as_any().downcast_ref::<Entity<editor::Editor>>()?;
+        let settings = theme_settings::ThemeSettings::get_global(cx);
+        let style = editor::EditorStyle {
+            background: gpui::rgb(0x08182c).into(),
+            local_player: cx.theme().players().local(),
+            syntax: cx.theme().syntax().clone(),
+            text: gpui::TextStyle {
+                font_family: settings.ui_font.family.clone(),
+                font_features: settings.ui_font.features.clone(),
+                font_size: rems(0.875).into(),
+                font_weight: settings.ui_font.weight,
+                line_height: relative(1.2),
+                color: gpui::rgb(0xf0f6ff).into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        Some(
+            h_flex()
+                .h_9()
+                .px_2p5()
+                .flex_none()
+                .overflow_hidden()
+                .bg(gpui::rgb(0x08182c))
+                .border_b_1()
+                .border_color(gpui::rgb(0x163451))
+                .child(
+                    div()
+                        .flex_1()
+                        .child(editor::EditorElement::new(editor, style)),
+                ),
+        )
     }
 
     fn match_count(&self) -> usize {
@@ -1231,13 +1344,23 @@ impl PickerDelegate for RecentProjectsDelegate {
         window: &mut Window,
         cx: &mut Context<Picker<Self>>,
     ) -> Option<Self::ListItem> {
-        match self.filtered_entries.get(ix)? {
+        let row = match self.filtered_entries.get(ix)? {
             ProjectPickerEntry::Header(title) => Some(
                 v_flex()
                     .w_full()
                     .gap_1()
                     .when(ix > 0, |this| this.mt_1().child(Divider::horizontal()))
-                    .child(ListSubHeader::new(title.clone()).inset(true))
+                    .map(|header| {
+                        if self.home_palette {
+                            header.px_2p5().child(
+                                Label::new(title.clone())
+                                    .size(LabelSize::Small)
+                                    .color(Color::Custom(gpui::rgb(0x9ebfe0).into())),
+                            )
+                        } else {
+                            header.child(ListSubHeader::new(title.clone()).inset(true))
+                        }
+                    })
                     .into_any_element(),
             ),
             ProjectPickerEntry::OpenFolder { index, positions } => {
@@ -1286,6 +1409,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                 Some(
                     ListItem::new(ix)
                         .toggle_state(selected)
+                        .selectable(!self.home_palette)
                         .inset(true)
                         .spacing(ListItemSpacing::Sparse)
                         .child(
@@ -1303,10 +1427,17 @@ impl PickerDelegate for RecentProjectsDelegate {
                                         .child(
                                             h_flex()
                                                 .gap_1()
-                                                .child(HighlightedLabel::new(
-                                                    name.to_string(),
-                                                    positions,
-                                                ))
+                                                .child(
+                                                    HighlightedLabel::new(
+                                                        name.to_string(),
+                                                        positions,
+                                                    )
+                                                    .color(if self.home_palette {
+                                                        Color::Custom(gpui::rgb(0xf0f6ff).into())
+                                                    } else {
+                                                        Color::Default
+                                                    }),
+                                                )
                                                 .when_some(branch, |this, branch| {
                                                     this.child(
                                                         Label::new(branch)
@@ -1326,7 +1457,11 @@ impl PickerDelegate for RecentProjectsDelegate {
                                             this.child(
                                                 Label::new(path.to_string_lossy().to_string())
                                                     .size(LabelSize::Small)
-                                                    .color(Color::Muted),
+                                                    .color(if self.home_palette {
+                                                        Color::Custom(gpui::rgb(0x9ebfe0).into())
+                                                    } else {
+                                                        Color::Muted
+                                                    }),
                                             )
                                         }),
                                 )
@@ -1450,6 +1585,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                     ListItem::new(ix)
                         .inset(true)
                         .toggle_state(selected)
+                        .selectable(!self.home_palette)
                         .spacing(ListItemSpacing::Sparse)
                         .child(
                             h_flex()
@@ -1465,7 +1601,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                                     if !self.render_paths {
                                         highlighted.paths.clear();
                                     }
-                                    highlighted.render(window, cx)
+                                    self.project_match_view(highlighted, window, cx)
                                 })
                                 .tooltip(Tooltip::text(tooltip_path)),
                         )
@@ -1629,6 +1765,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                 Some(
                     ListItem::new(ix)
                         .toggle_state(selected)
+                        .selectable(!self.home_palette)
                         .inset(true)
                         .spacing(ListItemSpacing::Sparse)
                         .child(
@@ -1646,7 +1783,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                                     if !self.render_paths {
                                         highlighted.paths.clear();
                                     }
-                                    highlighted.render(window, cx)
+                                    self.project_match_view(highlighted, window, cx)
                                 })
                                 .tooltip(move |_, cx| {
                                     Tooltip::with_meta(
@@ -1662,7 +1799,21 @@ impl PickerDelegate for RecentProjectsDelegate {
                         .into_any_element(),
                 )
             }
-        }
+        };
+        row.map(|row| {
+            if self.home_palette && is_selectable_entry(&self.filtered_entries[ix]) {
+                div()
+                    .mx_1()
+                    .rounded_md()
+                    .overflow_hidden()
+                    .when(selected, |row| row.bg(gpui::rgb(0x133457)))
+                    .hover(|style| style.bg(gpui::rgb(0x102844)))
+                    .child(row)
+                    .into_any_element()
+            } else {
+                row
+            }
+        })
     }
 
     fn render_footer(&self, _: &mut Window, cx: &mut Context<Picker<Self>>) -> Option<AnyElement> {
@@ -1770,6 +1921,7 @@ impl PickerDelegate for RecentProjectsDelegate {
         let secondary_footer_actions: Option<AnyElement> = match selected_entry {
             Some(ProjectPickerEntry::OpenFolder { .. }) => Some(
                 Button::new("remove_selected", "Remove Folder")
+                    .map(|button| self.footer_button(button))
                     .key_binding(KeyBinding::for_action_in(
                         &RemoveSelected,
                         &focus_handle,
@@ -1782,6 +1934,7 @@ impl PickerDelegate for RecentProjectsDelegate {
             ),
             Some(ProjectPickerEntry::ProjectGroup(_)) if !is_current_workspace_entry => Some(
                 Button::new("remove_selected", "Remove from Window")
+                    .map(|button| self.footer_button(button))
                     .key_binding(KeyBinding::for_action_in(
                         &RemoveSelected,
                         &focus_handle,
@@ -1794,6 +1947,7 @@ impl PickerDelegate for RecentProjectsDelegate {
             ),
             Some(ProjectPickerEntry::RecentProject(_)) => Some(
                 Button::new("delete_recent", "Remove")
+                    .map(|button| self.footer_button(button))
                     .key_binding(KeyBinding::for_action_in(
                         &RemoveSelected,
                         &focus_handle,
@@ -1814,7 +1968,11 @@ impl PickerDelegate for RecentProjectsDelegate {
                 .gap_1()
                 .justify_end()
                 .border_t_1()
-                .border_color(cx.theme().colors().border_variant)
+                .border_color(if self.home_palette {
+                    gpui::rgb(0x163451).into()
+                } else {
+                    cx.theme().colors().border_variant
+                })
                 .when_some(secondary_footer_actions, |this, actions| {
                     this.child(actions)
                 })
@@ -1826,6 +1984,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                                 let selected_index = self.selected_index;
                                 let filtered_entries = self.filtered_entries.clone();
                                 Button::new("move_to_new_window", "New Window")
+                                    .map(|button| self.footer_button(button))
                                     .key_binding(KeyBinding::for_action_in(
                                         &menu::SecondaryConfirm,
                                         &focus_handle,
@@ -1846,6 +2005,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                         })
                         .child(
                             Button::new("activate", "Activate")
+                                .map(|button| self.footer_button(button))
                                 .key_binding(KeyBinding::for_action_in(
                                     &menu::Confirm,
                                     &focus_handle,
@@ -1858,6 +2018,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                     } else if self.create_new_window {
                         this.child(
                             Button::new("open_here", "This Window")
+                                .map(|button| self.footer_button(button))
                                 .key_binding(KeyBinding::for_action_in(
                                     &menu::SecondaryConfirm,
                                     &focus_handle,
@@ -1869,6 +2030,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                         )
                         .child(
                             Button::new("open_new_window", "Open")
+                                .map(|button| self.footer_button(button))
                                 .key_binding(KeyBinding::for_action_in(
                                     &menu::Confirm,
                                     &focus_handle,
@@ -1881,6 +2043,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                     } else {
                         this.child(
                             Button::new("open_new_window", "New Window")
+                                .map(|button| self.footer_button(button))
                                 .key_binding(KeyBinding::for_action_in(
                                     &menu::SecondaryConfirm,
                                     &focus_handle,
@@ -1892,6 +2055,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                         )
                         .child(
                             Button::new("open_here", "Open")
+                                .map(|button| self.footer_button(button))
                                 .key_binding(KeyBinding::for_action_in(
                                     &menu::Confirm,
                                     &focus_handle,
@@ -1914,6 +2078,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                         })
                         .trigger(
                             Button::new("actions-trigger", "Actions")
+                                .map(|button| self.footer_button(button))
                                 .selected_style(ButtonStyle::Tinted(TintColor::Accent))
                                 .key_binding(KeyBinding::for_action_in(
                                     &ToggleActionsMenu,

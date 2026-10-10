@@ -15018,6 +15018,7 @@ dependencies = [
  "serde_json",
  "settings",
  "telemetry",
+ "theme_settings",
  "ui",
  "util",
  "windows-registry 0.6.1",
