@@ -27,7 +27,7 @@ pub use system_window_tabs::{
 
 /// Shared by the Chat brand, mode switch and native window controls.
 pub const KNIGHTCODE_CHAT_TITLE_BAR_HEIGHT: f32 = 48.;
-pub const KNIGHTCODE_HOME_TITLE_BAR_HEIGHT: f32 = 64.;
+pub const KNIGHTCODE_HOME_TITLE_BAR_HEIGHT: f32 = 48.;
 
 pub struct PlatformTitleBar {
     id: ElementId,

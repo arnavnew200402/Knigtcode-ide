@@ -109,11 +109,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native Build source/artwork validation failed.' }
           node script/check-home-design.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Native Home source/artwork validation failed.' }
+          # Pure sizing tests cover logical pixels/DPI without another large test binary.
+          $homeTests = Join-Path $env:RUNNER_TEMP 'knightcode-home-layout-tests.exe'
+          rustc --edition 2024 --test crates/knightcode_onboarding/src/workspace_modes/home_layout.rs -o $homeTests
+          if ($LASTEXITCODE -ne 0) { throw 'Home viewport sizing tests did not compile.' }
+          & $homeTests
+          if ($LASTEXITCODE -ne 0) { throw 'Home viewport/DPI sizing regression tests failed.' }
           rustfmt --edition 2024 --check `
             crates/knightcode_onboarding/src/build_layout.rs `
             crates/knightcode_onboarding/src/build_welcome.rs `
             crates/knightcode_onboarding/src/workspace_modes.rs `
             crates/knightcode_onboarding/src/workspace_modes/home_presentation.rs `
+            crates/knightcode_onboarding/src/workspace_modes/home_layout.rs `
             crates/title_bar/src/title_bar.rs `
             crates/platform_title_bar/src/platform_title_bar.rs `
             crates/agent_ui/src/conversation_view/thread_view/build_presentation.rs

@@ -1,10 +1,11 @@
+mod home_layout;
 mod home_presentation;
 
 use std::{collections::HashMap, sync::Arc};
 
 use agent_ui::{
     Agent, AgentPanel, AgentThreadSource, ConversationView, NewThread,
-    thread_metadata_store::{ThreadId, ThreadMetadata, ThreadMetadataStore, WorktreePaths},
+    thread_metadata_store::{ThreadId, ThreadMetadata, ThreadMetadataStore},
 };
 use chrono::{Local, Utc};
 use editor::Editor;
@@ -883,6 +884,7 @@ impl KnightCodePage {
         };
         let project = workspace.read(cx).project().read(cx);
         let work_dirs = project.default_path_list(cx);
+        let worktree_paths = project.worktree_paths(cx);
         let remote_connection = project.remote_connection_options(cx);
         let thread_id = ThreadId::new();
         let now = Utc::now();
@@ -899,7 +901,7 @@ impl KnightCodePage {
                     updated_at: now,
                     created_at: Some(now),
                     interacted_at: None,
-                    worktree_paths: WorktreePaths::from_folder_paths(&work_dirs),
+                    worktree_paths,
                     remote_connection,
                     archived: false,
                 },
@@ -1146,10 +1148,14 @@ impl KnightCodePage {
             };
             if last_group != Some(group) {
                 entries.push(
-                    Label::new(group)
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted)
-                        .mt_3()
+                    div()
+                        .flex_none()
+                        .pt_3()
+                        .child(
+                            Label::new(group)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        )
                         .into_any_element(),
                 );
                 last_group = Some(group);
@@ -1163,6 +1169,8 @@ impl KnightCodePage {
             entries.push(
                 div()
                     .w_full()
+                    .h(px(40.))
+                    .flex_none()
                     .rounded_lg()
                     .overflow_hidden()
                     .when(selected, |row| row.bg(rgba(0x6b4bc630)))
@@ -1216,6 +1224,7 @@ impl KnightCodePage {
             .child(
                 div()
                     .w_full()
+                    .flex_none()
                     .rounded_lg()
                     .overflow_hidden()
                     .border_1()
@@ -1252,6 +1261,7 @@ impl KnightCodePage {
             .child(
                 h_flex()
                     .h(px(48.))
+                    .flex_none()
                     .px_3()
                     .gap_2()
                     .rounded_lg()

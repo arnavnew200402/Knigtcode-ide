@@ -1219,7 +1219,12 @@ impl ConversationView {
                 ),
             };
         }
-        let session_work_dirs = work_dirs.unwrap_or_else(|| project.read(cx).default_path_list(cx));
+        // Scratch-chat metadata deliberately has no project roots. An explicit
+        // empty path list is an identity, not a usable engine cwd. Normalize it
+        // just like an omitted cwd, without changing the persisted roots.
+        let session_work_dirs = work_dirs
+            .filter(|paths| !paths.is_empty())
+            .unwrap_or_else(|| project.read(cx).default_path_list(cx));
 
         let connection_entry = connection_store.update(cx, |store, cx| {
             store.request_connection(connection_key, agent.clone(), cx)
@@ -1891,8 +1896,10 @@ impl ConversationView {
 
                 // Skip notifying when a queued message was just auto-sent: the agent
                 // is not actually idle and a notification here would fire just before the
-                // next turn starts.
-                if !sent_queued_message {
+                // next turn starts. Full-page Chat already presents the reply
+                // inline; it must not show a completion popup or play a sound.
+                // Errors, refusals and permission prompts keep their own paths.
+                if !sent_queued_message && !self.full_page_chat {
                     let used_tools = thread.read(cx).used_tools_since_last_user_message();
                     self.notify_with_sound(
                         if used_tools {
@@ -4277,6 +4284,53 @@ pub(crate) mod tests {
         );
     }
 
+    #[gpui::test(iterations = 5)]
+    async fn test_full_page_chat_suppresses_reply_notifications(cx: &mut TestAppContext) {
+        init_test(cx);
+        cx.update(|cx| {
+            AgentSettings::override_global(
+                AgentSettings {
+                    notify_when_agent_waiting: NotifyWhenAgentWaiting::PrimaryScreen,
+                    ..AgentSettings::get_global(cx).clone()
+                },
+                cx,
+            );
+        });
+        let (conversation, cx) =
+            setup_conversation_view(StubAgentServer::default_response(), cx).await;
+        conversation.update_in(cx, |conversation, window, cx| {
+            conversation.set_full_page_chat(true, window, cx)
+        });
+        message_editor(&conversation, cx).update_in(cx, |editor, window, cx| {
+            editor.set_text("Hello in Chat", window, cx)
+        });
+        cx.deactivate_window();
+        active_thread(&conversation, cx).update_in(cx, |view, window, cx| view.send(window, cx));
+        cx.run_until_parked();
+        assert!(
+            cx.windows()
+                .iter()
+                .all(|window| window.downcast::<AgentNotification>().is_none())
+        );
+        assert!(message_editor(&conversation, cx).read_with(cx, |editor, cx| editor.is_empty(cx)));
+
+        // This is a presentation rule, not a persisted notification setting.
+        conversation.update_in(cx, |conversation, window, cx| {
+            conversation.set_full_page_chat(false, window, cx)
+        });
+        message_editor(&conversation, cx).update_in(cx, |editor, window, cx| {
+            editor.set_text("Notify outside Chat", window, cx)
+        });
+        cx.deactivate_window();
+        active_thread(&conversation, cx).update_in(cx, |view, window, cx| view.send(window, cx));
+        cx.run_until_parked();
+        assert!(
+            cx.windows()
+                .iter()
+                .any(|window| window.downcast::<AgentNotification>().is_some())
+        );
+    }
+
     #[gpui::test]
     async fn test_notification_for_stop_event(cx: &mut TestAppContext) {
         init_test(cx);
@@ -4763,6 +4817,63 @@ pub(crate) mod tests {
             .await;
 
         assert!(contents_result.is_ok());
+    }
+
+    #[gpui::test(iterations = 5)]
+    async fn test_full_page_chat_restores_empty_saved_cwd(cx: &mut TestAppContext) {
+        init_test(cx);
+        // Exercise both scratch/project workspaces and new/restored sessions.
+        for has_project in [false, true] {
+            for resume in [false, true] {
+                let fs = FakeFs::new(cx.executor());
+                fs.insert_tree("/project", json!({ "file.txt": "hello" }))
+                    .await;
+                let roots = if has_project {
+                    vec![Path::new("/project")]
+                } else {
+                    Vec::new()
+                };
+                let project = Project::test(fs, roots, cx).await;
+                let (multi_workspace, visual_cx) = cx.add_window_view(|window, cx| {
+                    MultiWorkspace::test_new(project.clone(), window, cx)
+                });
+                let expected_cwd =
+                    project.read_with(visual_cx, |project, cx| project.default_path_list(cx));
+                assert!(!expected_cwd.is_empty());
+                let workspace =
+                    multi_workspace.read_with(visual_cx, |mw, _| mw.workspace().clone());
+                let connection = CwdCapturingConnection::new();
+                let captured_cwd = connection.captured_work_dirs.clone();
+                let thread_store = visual_cx.update(|_, cx| cx.new(|cx| ThreadStore::new(cx)));
+                let connection_store = visual_cx
+                    .update(|_, cx| cx.new(|cx| AgentConnectionStore::new(project.clone(), cx)));
+                let conversation = visual_cx.update(|window, cx| {
+                    cx.new(|cx| {
+                        ConversationView::new(
+                            Rc::new(StubAgentServer::new(connection)),
+                            connection_store,
+                            Agent::Custom { id: "Test".into() },
+                            resume.then(|| acp::SessionId::new("saved-scratch-session")),
+                            None,
+                            Some(PathList::default()),
+                            None,
+                            None,
+                            workspace.downgrade(),
+                            project,
+                            Some(thread_store),
+                            AgentThreadSource::Sidebar,
+                            window,
+                            cx,
+                        )
+                    })
+                });
+                visual_cx.run_until_parked();
+                assert_eq!(captured_cwd.lock().as_ref(), Some(&expected_cwd));
+                assert!(conversation.read_with(visual_cx, |conversation, _| {
+                    conversation.as_connected().is_some()
+                }));
+            }
+        }
     }
 
     #[gpui::test]

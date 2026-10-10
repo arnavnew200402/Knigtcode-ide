@@ -956,16 +956,16 @@ impl TitleBar {
             .relative()
             .key_context("KnightCodeHome")
             .justify_between()
-            .px_8()
+            .px_6()
             .child(
                 ButtonLike::new("home-brand")
-                    .height(px(56.).into())
+                    .height(px(38.).into())
                     .style(ButtonStyle::Transparent)
                     .aria_label("KnightCode Home")
                     .tooltip(Tooltip::text("Home"))
                     .child(
                         h_flex()
-                            .text_size(px(24.))
+                            .text_size(px(20.))
                             .font_weight(gpui::FontWeight::BOLD)
                             .child(div().text_color(gpui::rgb(0xf4f7ff)).child("Knight"))
                             .child(div().text_color(gpui::rgb(0x9293ff)).child("Code")),
@@ -1004,7 +1004,7 @@ impl TitleBar {
                     )
                     .child(
                         div()
-                            .h(px(30.))
+                            .h(px(24.))
                             .border_r_1()
                             .border_color(gpui::rgb(0x244768)),
                     ),
@@ -1026,7 +1026,7 @@ impl TitleBar {
                                 .trigger_with_tooltip(
                                     ButtonLike::new("home-search")
                                         .full_width()
-                                        .height(px(40.).into())
+                                        .height(px(32.).into())
                                         .style(ButtonStyle::Transparent)
                                         .aria_label("Search files, symbols, or ask KnightCode")
                                         .child(

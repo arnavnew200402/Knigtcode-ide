@@ -1,5 +1,5 @@
-//! Native blue Home surface. Only the scenery is raster artwork; every
-//! heading, action, recent-project name, path and timestamp is live GPUI UI.
+//! Native, viewport-fit Home. One scenic background; all text and controls
+//! are live GPUI elements, with no page scroll container or raster UI overlays.
 use std::sync::{Arc, OnceLock};
 
 use gpui::{
@@ -9,11 +9,10 @@ use gpui::{
 use ui::{ButtonLike, ContextMenu, PopoverMenu, Tooltip, prelude::*};
 use workspace::{RecentWorkspace, SerializedWorkspaceLocation};
 
-use super::KnightCodePage;
+use super::{KnightCodePage, home_layout::HomeLayout};
 
 struct HomeArtwork {
     landscape: Arc<Image>,
-    texture: Arc<Image>,
 }
 impl HomeArtwork {
     fn get() -> &'static Self {
@@ -22,10 +21,6 @@ impl HomeArtwork {
             landscape: Arc::new(Image::from_bytes(
                 ImageFormat::Png,
                 include_bytes!("../../assets/home-landscape.png").to_vec(),
-            )),
-            texture: Arc::new(Image::from_bytes(
-                ImageFormat::Png,
-                include_bytes!("../../assets/home-card-texture.png").to_vec(),
             )),
         })
     }
@@ -58,54 +53,60 @@ fn action_card(
     caption: &'static str,
     icon: IconName,
     action: Box<dyn Action>,
+    layout: HomeLayout,
 ) -> impl IntoElement {
     let header_action = action.boxed_clone();
     v_flex()
         .relative()
         .flex_1()
-        .min_w(px(300.))
-        .p_5()
-        .gap_4()
+        .min_w_0()
+        .h_full()
+        .p(px(layout.card_padding))
+        .gap(px(layout.card_gap))
         .rounded_xl()
         .border_1()
         .border_color(rgba(0x64c4ff99))
         .bg(rgba(0x061327df))
         .overflow_hidden()
         .child(
-            img(HomeArtwork::get().texture.clone())
-                .absolute()
-                .size_full()
-                .object_fit(ObjectFit::Cover)
-                .opacity(0.16),
-        )
-        .child(
             ButtonLike::new(format!("{id}-heading"))
                 .full_width()
-                .height(px(72.).into())
+                .height(px(layout.card_header_height).into())
                 .style(ButtonStyle::Transparent)
                 .aria_label(title)
                 .child(
                     h_flex()
                         .w_full()
                         .min_w_0()
-                        .gap_5()
-                        .child(icon_tile(icon, 72.))
+                        .text_left()
+                        .gap(px(layout.card_gap))
+                        .child(icon_tile(icon, layout.card_header_height))
                         .child(
                             v_flex()
                                 .flex_1()
                                 .min_w_0()
+                                .items_start()
                                 .gap_2()
                                 .child(
                                     div()
-                                        .text_size(px(22.))
+                                        .text_size(px(if layout.show_descriptions {
+                                            22.
+                                        } else {
+                                            20.
+                                        }))
                                         .font_weight(gpui::FontWeight::SEMIBOLD)
                                         .child(title),
                                 )
-                                .child(
-                                    Label::new(description)
-                                        .size(LabelSize::Small)
-                                        .color(Color::Custom(rgb(0xc7e3f7).into())),
-                                ),
+                                .when(layout.show_descriptions, |column| {
+                                    column.child(
+                                        div().w_full().overflow_hidden().child(
+                                            Label::new(description)
+                                                .truncate()
+                                                .size(LabelSize::Small)
+                                                .color(Color::Custom(rgb(0xc7e3f7).into())),
+                                        ),
+                                    )
+                                }),
                         )
                         .child(
                             Icon::new(IconName::ChevronRight)
@@ -120,26 +121,21 @@ fn action_card(
             div()
                 .relative()
                 .w_full()
+                .h(px(layout.button_height))
+                .flex_none()
                 .rounded_lg()
                 .overflow_hidden()
                 .border_1()
                 .border_color(rgb(0x74caff))
                 .bg(gpui::linear_gradient(
                     110.,
-                    gpui::linear_color_stop(rgb(0x42c8ff), 0.),
-                    gpui::linear_color_stop(rgb(0x153769), 0.5),
+                    gpui::linear_color_stop(rgb(0x239bd2), 0.),
+                    gpui::linear_color_stop(rgb(0x153769), 1.),
                 ))
-                .child(
-                    img(HomeArtwork::get().texture.clone())
-                        .absolute()
-                        .size_full()
-                        .object_fit(ObjectFit::Cover)
-                        .opacity(0.32),
-                )
                 .child(
                     ButtonLike::new(id)
                         .full_width()
-                        .height(px(50.).into())
+                        .height(px(layout.button_height - 2.).into())
                         .style(ButtonStyle::Transparent)
                         .aria_label(caption)
                         .child(
@@ -162,7 +158,11 @@ fn action_card(
         )
 }
 
-fn recent_card(recent: &RecentWorkspace, cx: &mut Context<KnightCodePage>) -> impl IntoElement {
+fn recent_card(
+    recent: &RecentWorkspace,
+    layout: HomeLayout,
+    cx: &mut Context<KnightCodePage>,
+) -> impl IntoElement {
     let name = recent
         .identity_paths
         .paths()
@@ -191,33 +191,30 @@ fn recent_card(recent: &RecentWorkspace, cx: &mut Context<KnightCodePage>) -> im
     let menu_recent = recent.clone();
     let weak = cx.weak_entity();
     let copy_paths = paths.clone();
-    // The entire card opens a real project; the ellipsis has a separate native
-    // menu rather than a decorative/unconnected screenshot control.
+    let padding = if layout.recent_height < 100. {
+        10.
+    } else {
+        16.
+    };
+    let icon_size = if layout.recent_height < 100. {
+        44.
+    } else {
+        64.
+    };
     div()
         .relative()
         .flex_1()
-        .min_w(px(260.))
+        .min_w_0()
+        .h_full()
         .rounded_lg()
         .border_1()
         .border_color(rgba(0x4299e066))
         .overflow_hidden()
-        .bg(rgb(0x081426))
-        .child(
-            img(HomeArtwork::get().texture.clone())
-                .absolute()
-                .size_full()
-                .object_fit(ObjectFit::Cover)
-                .opacity(0.48),
-        )
-        .child(div().absolute().size_full().bg(gpui::linear_gradient(
-            0.,
-            gpui::linear_color_stop(rgba(0x060d1cef), 0.),
-            gpui::linear_color_stop(rgba(0x08142633), 1.),
-        )))
+        .bg(rgba(0x081426df))
         .child(
             ButtonLike::new(format!("home-recent-{}", i64::from(recent.workspace_id)))
                 .full_width()
-                .height(px(112.).into())
+                .height(px(layout.recent_height - 2.).into())
                 .style(ButtonStyle::Transparent)
                 .aria_label(format!("Open {name}"))
                 .child(
@@ -225,15 +222,17 @@ fn recent_card(recent: &RecentWorkspace, cx: &mut Context<KnightCodePage>) -> im
                         .relative()
                         .w_full()
                         .min_w_0()
-                        .p_4()
-                        .gap_4()
-                        .items_start()
-                        .child(icon_tile(icon, 64.))
+                        .h_full()
+                        .p(px(padding))
+                        .gap(px(layout.card_gap))
+                        .text_left()
+                        .child(icon_tile(icon, icon_size))
                         .child(
                             v_flex()
                                 .flex_1()
                                 .min_w_0()
-                                .gap_2()
+                                .items_start()
+                                .gap_1()
                                 .pr_5()
                                 .child(
                                     Label::new(name)
@@ -249,6 +248,7 @@ fn recent_card(recent: &RecentWorkspace, cx: &mut Context<KnightCodePage>) -> im
                                 .child(
                                     Label::new(format!("Last opened · {timestamp}"))
                                         .size(LabelSize::XSmall)
+                                        .truncate()
                                         .color(Color::Custom(rgb(0xc6dff5).into())),
                                 ),
                         ),
@@ -293,44 +293,55 @@ pub(super) fn render(
     window: &Window,
     cx: &mut Context<KnightCodePage>,
 ) -> AnyElement {
-    let compact = f32::from(window.viewport_size().width) < 1200.
-        || f32::from(window.viewport_size().height) < 760.;
-    let hero_height = if compact { 330. } else { 438. };
-    let heading_size = if compact { 44. } else { 64. };
+    // Use logical client pixels, excluding Home chrome. Flex sizing still uses
+    // the actual parent bounds, so frame rounding cannot introduce scrolling.
+    let body_height = f32::from(window.viewport_size().height)
+        - title_bar::platform_title_bar::KNIGHTCODE_HOME_TITLE_BAR_HEIGHT
+        - 2.;
+    let layout = HomeLayout::new(f32::from(window.viewport_size().width), body_height);
     let recent_cards = page
         .recent
         .as_ref()
         .into_iter()
         .flatten()
-        .take(3)
-        .map(|recent| recent_card(recent, cx).into_any_element())
+        .take(layout.recent_count)
+        .map(|recent| recent_card(recent, layout, cx).into_any_element())
         .collect::<Vec<_>>();
-    v_flex().id("home-content").size_full().relative().overflow_hidden().bg(rgb(0x030913)).text_color(rgb(0xf6f8ff))
-        .child(img(HomeArtwork::get().landscape.clone()).absolute().size_full().object_fit(ObjectFit::Fill))
-        .child(v_flex().id("home-scroll").relative().size_full().overflow_y_scroll()
-            .pl(relative(if compact { 0.05 } else { 0.094 })).pr(relative(if compact { 0.05 } else { 0.068 })).pb_8()
-            .child(v_flex().h(px(hero_height)).pt(px(if compact { 24. } else { 72. })).flex_none().justify_center().gap_5().max_w(px(700.))
-                .child(div().text_size(px(13.)).text_color(rgb(0x62d8ff)).child("T H I N K  •  B U I L D  •  B E Y O N D"))
-                .child(v_flex().text_size(px(heading_size)).line_height(relative(1.10)).font_weight(gpui::FontWeight::BOLD)
-                    .child("Turn your ideas")
-                    .child(h_flex().flex_wrap().gap_3().child("into")
-                        .child(div().text_color(rgb(0x91c9fa)).child("real"))
-                        .child(div().text_color(rgb(0x949cff)).child("impact."))))
-                .child(v_flex().gap_1().text_size(px(if compact { 17. } else { 20. })).text_color(rgb(0xbfe5fa))
-                    .child("Chat with AI, or open a project and start building.")
-                    .child("Same intelligence. More possibilities.")))
-            .child(h_flex().w_full().gap_5().flex_wrap()
-                .child(action_card("home-start-chat", "Chat", "Ask, explore, brainstorm and get instant answers.", "Start chatting", IconName::Chat, title_bar::ShowChat.boxed_clone()))
-                .child(action_card("home-open-project", "Build", "Open a project, write code, run commands and build with AI.", "Open project", IconName::Code, workspace::Open::default().boxed_clone())))
-            .child(h_flex().w_full().mt_6().mb_3().justify_between()
+    v_flex().id("home-content").size_full().min_h_0().min_w_0().relative().overflow_hidden()
+        .bg(rgb(0x030913)).text_color(rgb(0xf6f8ff))
+        .child(img(HomeArtwork::get().landscape.clone()).absolute().size_full().object_fit(ObjectFit::Cover))
+        .child(v_flex().id("home-layout").relative().size_full().min_h_0().min_w_0().overflow_hidden()
+            .pl(relative(layout.left_inset)).pr(relative(layout.right_inset)).pb(px(layout.bottom_padding))
+            .child(v_flex().id("home-hero").flex_1().min_h_0().max_w(px(layout.hero_width))
+                .justify_center().gap(px(layout.hero_gap)).overflow_hidden()
+                .when(layout.show_hero, |hero| hero
+                    .when(layout.show_tagline, |hero| hero.child(div().text_size(px(13.)).line_height(relative(1.2)).text_color(rgb(0x62d8ff))
+                        .child("T H I N K  •  B U I L D  •  B E Y O N D")))
+                    .child(v_flex().text_size(px(layout.heading_size)).line_height(relative(1.10))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .child("Turn your ideas")
+                        .child(h_flex().gap_3().child("into")
+                            .child(div().text_color(rgb(0x91c9fa)).child("real"))
+                            .child(div().text_color(rgb(0x949cff)).child("impact."))))
+                    .when(layout.show_subtitle, |hero| hero.child(v_flex().gap(px(4.)).text_size(px(layout.subtitle_size)).line_height(relative(1.2))
+                        .text_color(rgb(0xbfe5fa))
+                        .child("Chat with AI, or open a project and start building.")
+                        .child("Same intelligence. More possibilities.")))))
+            .child(h_flex().id("home-actions").w_full().h(px(layout.action_height)).flex_none().gap(px(layout.row_gap))
+                .child(action_card("home-start-chat", "Chat", "Ask, explore, brainstorm and get instant answers.", "Start chatting", IconName::Chat, title_bar::ShowChat.boxed_clone(), layout))
+                .child(action_card("home-open-project", "Build", "Open a project, write code, run commands and build with AI.", "Open project", IconName::Code, workspace::Open::default().boxed_clone(), layout)))
+            .child(h_flex().w_full().flex_none().h(px(layout.recent_header_height)).mt(px(layout.recent_top_gap))
+                .justify_between()
                 .child(h_flex().gap_3().child(Icon::new(IconName::Clock).color(Color::Custom(rgb(0xb8eaff).into())))
                     .child(Label::new("Recent projects").color(Color::Custom(rgb(0xf3f7ff).into()))))
-                .child(Button::new("home-all-projects", "View all").end_icon(Icon::new(IconName::ArrowRight)).color(Color::Custom(rgb(0xc8eaff).into()))
+                .child(Button::new("home-all-projects", "View all").end_icon(Icon::new(IconName::ArrowRight))
+                    .color(Color::Custom(rgb(0xc8eaff).into()))
                     .on_click(|_, window, cx| window.dispatch_action(zed_actions::OpenRecent::default().boxed_clone(), cx))))
-            .when_some(page.recent_error.clone(), |view, error| view.child(Label::new(error).color(Color::Error)))
-            .child(h_flex().w_full().gap_3().flex_wrap()
+            .when(layout.show_recent_cards, |view| view.child(h_flex().id("home-recents").w_full()
+                .h(px(layout.recent_height)).flex_none().mt(px(layout.recent_bottom_gap)).gap_3()
+                .when_some(page.recent_error.clone(), |view, error| view.child(Label::new(error).truncate().color(Color::Error)))
                 .when(page.recent.is_none() && page.recent_error.is_none(), |view| view.child(Label::new("Loading recent projects…").color(Color::Custom(rgb(0xbfe5fa).into()))))
-                .when(page.recent.as_ref().is_some_and(Vec::is_empty), |view| view.child(Label::new("Your recent projects will appear here after you open a folder.").color(Color::Custom(rgb(0xbfe5fa).into()))))
-                .children(recent_cards)))
+                .when(page.recent.as_ref().is_some_and(Vec::is_empty), |view| view.child(Label::new("Your recent projects will appear here after you open a folder.").truncate().color(Color::Custom(rgb(0xbfe5fa).into()))))
+                .children(recent_cards))))
         .into_any_element()
 }
