@@ -61,7 +61,7 @@ pub struct NativeHost {
 }
 
 fn parent_view(window: &Window) -> Result<id> {
-    match window.window_handle()?.as_raw() {
+    match HasWindowHandle::window_handle(window)?.as_raw() {
         RawWindowHandle::AppKit(handle) => Ok(handle.ns_view.as_ptr().cast()),
         _ => bail!("WKWebView requires an AppKit window"),
     }
