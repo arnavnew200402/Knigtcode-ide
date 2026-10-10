@@ -298,7 +298,18 @@ pub(super) fn render(
     let body_height = f32::from(window.viewport_size().height)
         - title_bar::platform_title_bar::KNIGHTCODE_HOME_TITLE_BAR_HEIGHT
         - 2.;
-    let layout = HomeLayout::new(f32::from(window.viewport_size().width), body_height);
+    // Only actual, successfully loaded project history belongs on Home.
+    // Loading, a fresh install, and empty history show no recent-project UI.
+    let has_recents = page.recent_error.is_none()
+        && page
+            .recent
+            .as_ref()
+            .is_some_and(|recent| !recent.is_empty());
+    let layout = HomeLayout::new(
+        f32::from(window.viewport_size().width),
+        body_height,
+        has_recents,
+    );
     let recent_cards = page
         .recent
         .as_ref()
@@ -307,41 +318,153 @@ pub(super) fn render(
         .take(layout.recent_count)
         .map(|recent| recent_card(recent, layout, cx).into_any_element())
         .collect::<Vec<_>>();
-    v_flex().id("home-content").size_full().min_h_0().min_w_0().relative().overflow_hidden()
-        .bg(rgb(0x030913)).text_color(rgb(0xf6f8ff))
-        .child(img(HomeArtwork::get().landscape.clone()).absolute().size_full().object_fit(ObjectFit::Cover))
-        .child(v_flex().id("home-layout").relative().size_full().min_h_0().min_w_0().overflow_hidden()
-            .pl(relative(layout.left_inset)).pr(relative(layout.right_inset)).pb(px(layout.bottom_padding))
-            .child(v_flex().id("home-hero").flex_1().min_h_0().max_w(px(layout.hero_width))
-                .justify_center().gap(px(layout.hero_gap)).overflow_hidden()
-                .when(layout.show_hero, |hero| hero
-                    .when(layout.show_tagline, |hero| hero.child(div().text_size(px(13.)).line_height(relative(1.2)).text_color(rgb(0x62d8ff))
-                        .child("T H I N K  •  B U I L D  •  B E Y O N D")))
-                    .child(v_flex().text_size(px(layout.heading_size)).line_height(relative(1.10))
-                        .font_weight(gpui::FontWeight::BOLD)
-                        .child("Turn your ideas")
-                        .child(h_flex().gap_3().child("into")
-                            .child(div().text_color(rgb(0x91c9fa)).child("real"))
-                            .child(div().text_color(rgb(0x949cff)).child("impact."))))
-                    .when(layout.show_subtitle, |hero| hero.child(v_flex().gap(px(4.)).text_size(px(layout.subtitle_size)).line_height(relative(1.2))
-                        .text_color(rgb(0xbfe5fa))
-                        .child("Chat with AI, or open a project and start building.")
-                        .child("Same intelligence. More possibilities.")))))
-            .child(h_flex().id("home-actions").w_full().h(px(layout.action_height)).flex_none().gap(px(layout.row_gap))
-                .child(action_card("home-start-chat", "Chat", "Ask, explore, brainstorm and get instant answers.", "Start chatting", IconName::Chat, title_bar::ShowChat.boxed_clone(), layout))
-                .child(action_card("home-open-project", "Build", "Open a project, write code, run commands and build with AI.", "Open project", IconName::Code, workspace::Open::default().boxed_clone(), layout)))
-            .child(h_flex().w_full().flex_none().h(px(layout.recent_header_height)).mt(px(layout.recent_top_gap))
-                .justify_between()
-                .child(h_flex().gap_3().child(Icon::new(IconName::Clock).color(Color::Custom(rgb(0xb8eaff).into())))
-                    .child(Label::new("Recent projects").color(Color::Custom(rgb(0xf3f7ff).into()))))
-                .child(Button::new("home-all-projects", "View all").end_icon(Icon::new(IconName::ArrowRight))
-                    .color(Color::Custom(rgb(0xc8eaff).into()))
-                    .on_click(|_, window, cx| window.dispatch_action(zed_actions::OpenRecent::default().boxed_clone(), cx))))
-            .when(layout.show_recent_cards, |view| view.child(h_flex().id("home-recents").w_full()
-                .h(px(layout.recent_height)).flex_none().mt(px(layout.recent_bottom_gap)).gap_3()
-                .when_some(page.recent_error.clone(), |view, error| view.child(Label::new(error).truncate().color(Color::Error)))
-                .when(page.recent.is_none() && page.recent_error.is_none(), |view| view.child(Label::new("Loading recent projects…").color(Color::Custom(rgb(0xbfe5fa).into()))))
-                .when(page.recent.as_ref().is_some_and(Vec::is_empty), |view| view.child(Label::new("Your recent projects will appear here after you open a folder.").truncate().color(Color::Custom(rgb(0xbfe5fa).into()))))
-                .children(recent_cards))))
+    v_flex()
+        .id("home-content")
+        .size_full()
+        .min_h_0()
+        .min_w_0()
+        .relative()
+        .overflow_hidden()
+        .bg(rgb(0x030913))
+        .text_color(rgb(0xf6f8ff))
+        .child(
+            img(HomeArtwork::get().landscape.clone())
+                .absolute()
+                .size_full()
+                .object_fit(ObjectFit::Cover),
+        )
+        .child(
+            v_flex()
+                .id("home-layout")
+                .relative()
+                .size_full()
+                .min_h_0()
+                .min_w_0()
+                .overflow_hidden()
+                .pl(relative(layout.left_inset))
+                .pr(relative(layout.right_inset))
+                .pb(px(layout.bottom_padding))
+                .child(
+                    v_flex()
+                        .id("home-hero")
+                        .flex_1()
+                        .min_h_0()
+                        .max_w(px(layout.hero_width))
+                        .justify_center()
+                        .gap(px(layout.hero_gap))
+                        .overflow_hidden()
+                        .when(layout.show_hero, |hero| {
+                            hero.when(layout.show_tagline, |hero| {
+                                hero.child(
+                                    div()
+                                        .text_size(px(13.))
+                                        .line_height(relative(1.2))
+                                        .text_color(rgb(0x62d8ff))
+                                        .child("T H I N K  •  B U I L D  •  B E Y O N D"),
+                                )
+                            })
+                            .child(
+                                v_flex()
+                                    .text_size(px(layout.heading_size))
+                                    .line_height(relative(1.10))
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .child("Turn your ideas")
+                                    .child(
+                                        h_flex()
+                                            .gap_3()
+                                            .child("into")
+                                            .child(div().text_color(rgb(0x91c9fa)).child("real"))
+                                            .child(
+                                                div().text_color(rgb(0x949cff)).child("impact."),
+                                            ),
+                                    ),
+                            )
+                            .when(layout.show_subtitle, |hero| {
+                                hero.child(
+                                    v_flex()
+                                        .gap(px(4.))
+                                        .text_size(px(layout.subtitle_size))
+                                        .line_height(relative(1.2))
+                                        .text_color(rgb(0xbfe5fa))
+                                        .child(
+                                            "Chat with AI, or open a project and start building.",
+                                        )
+                                        .child("Same intelligence. More possibilities."),
+                                )
+                            })
+                        }),
+                )
+                .child(
+                    h_flex()
+                        .id("home-actions")
+                        .w_full()
+                        .h(px(layout.action_height))
+                        .flex_none()
+                        .gap(px(layout.row_gap))
+                        .child(action_card(
+                            "home-start-chat",
+                            "Chat",
+                            "Ask, explore, brainstorm and get instant answers.",
+                            "Start chatting",
+                            IconName::Chat,
+                            title_bar::ShowChat.boxed_clone(),
+                            layout,
+                        ))
+                        .child(action_card(
+                            "home-open-project",
+                            "Build",
+                            "Open a project, write code, run commands and build with AI.",
+                            "Open project",
+                            IconName::Code,
+                            workspace::Open::default().boxed_clone(),
+                            layout,
+                        )),
+                )
+                .when(has_recents, |view| {
+                    view.child(
+                        h_flex()
+                            .w_full()
+                            .flex_none()
+                            .h(px(layout.recent_header_height))
+                            .mt(px(layout.recent_top_gap))
+                            .justify_between()
+                            .child(
+                                h_flex()
+                                    .gap_3()
+                                    .child(
+                                        Icon::new(IconName::Clock)
+                                            .color(Color::Custom(rgb(0xb8eaff).into())),
+                                    )
+                                    .child(
+                                        Label::new("Recent projects")
+                                            .color(Color::Custom(rgb(0xf3f7ff).into())),
+                                    ),
+                            )
+                            .child(
+                                Button::new("home-all-projects", "View all")
+                                    .end_icon(Icon::new(IconName::ArrowRight))
+                                    .color(Color::Custom(rgb(0xc8eaff).into()))
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(
+                                            zed_actions::OpenRecent::default().boxed_clone(),
+                                            cx,
+                                        )
+                                    }),
+                            ),
+                    )
+                    .when(layout.show_recent_cards, |view| {
+                        view.child(
+                            h_flex()
+                                .id("home-recents")
+                                .w_full()
+                                .h(px(layout.recent_height))
+                                .flex_none()
+                                .mt(px(layout.recent_bottom_gap))
+                                .gap_3()
+                                .children(recent_cards),
+                        )
+                    })
+                }),
+        )
         .into_any_element()
 }

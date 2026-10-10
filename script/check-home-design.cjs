@@ -29,6 +29,9 @@ assert(!home.includes('overflow_y_scroll') && !home.includes('overflow_x_scroll'
 assert(!home.includes('flex_wrap'), 'Home card rows must not wrap into clipped content');
 assert(home.includes('HomeLayout::new'), 'Use logical viewport-fit sizing');
 assert(home.includes('take(layout.recent_count)'), 'Limit recent cards to available width');
+assert(home.includes('.when(has_recents,'), 'Hide the entire recent-project section until actual history exists');
+assert(home.includes('is_some_and(|recent| !recent.is_empty())'), 'Never fabricate recent projects');
+assert(!home.includes('Loading recent projects') && !home.includes('Your recent projects will appear'), 'No empty/loading recent-project row');
 assert.equal((home.match(/\bimg\(/g) || []).length, 1, 'Use one background image, not repeated card textures');
 assert(home.includes('ObjectFit::Cover'), 'Do not stretch background proportions');
 assert(platform.includes('KNIGHTCODE_HOME_TITLE_BAR_HEIGHT: f32 = 48.'), 'Home header must stay slim');

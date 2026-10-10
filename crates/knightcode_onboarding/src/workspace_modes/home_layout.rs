@@ -28,7 +28,7 @@ pub(crate) struct HomeLayout {
 }
 
 impl HomeLayout {
-    pub fn new(width: f32, body_height: f32) -> Self {
+    pub fn new(width: f32, body_height: f32, has_recents: bool) -> Self {
         let compact = body_height < 560.;
         let very_short = body_height < 400.;
         let narrow = width < 850.;
@@ -59,11 +59,17 @@ impl HomeLayout {
         } else {
             114.
         };
-        let recent_top_gap = if compact { 12. } else { 24. };
+        let recent_top_gap = if !has_recents {
+            0.
+        } else if compact {
+            12.
+        } else {
+            24.
+        };
         let recent_bottom_gap = if compact { 8. } else { 12. };
-        let recent_header_height = 28.;
+        let recent_header_height = if has_recents { 28. } else { 0. };
         let bottom_padding = if compact { 12. } else { 24. };
-        let show_recent_cards = body_height >= 270.;
+        let show_recent_cards = has_recents && body_height >= 270.;
         let fixed_height = action_height
             + recent_top_gap
             + recent_header_height
@@ -144,7 +150,7 @@ mod tests {
             for dpi in [1., 1.25, 1.5, 2.] {
                 let width = width / dpi;
                 let body_height = height / dpi - 50.; // Slim Home header + window border.
-                let layout = HomeLayout::new(width, body_height);
+                let layout = HomeLayout::new(width, body_height, true);
                 assert!(layout.left_inset + layout.right_inset < 0.2);
                 assert!(layout.row_gap >= 12. && layout.hero_width <= width);
                 assert!(layout.button_height >= 32.);
@@ -192,16 +198,29 @@ mod tests {
 
     #[test]
     fn test_home_screenshot_at_windows_125_percent_keeps_all_recent_cards() {
-        let layout = HomeLayout::new(1916. / 1.25, 1017. / 1.25 - 50.);
+        let layout = HomeLayout::new(1916. / 1.25, 1017. / 1.25 - 50., true);
         assert_eq!(layout.recent_count, 3);
         assert!(layout.show_recent_cards && layout.show_hero && layout.show_subtitle);
     }
 
     #[test]
     fn test_home_narrow_windows_limit_recent_cards_instead_of_wrapping() {
-        assert_eq!(HomeLayout::new(500., 500.).recent_count, 1);
-        assert_eq!(HomeLayout::new(750., 500.).recent_count, 2);
-        assert_eq!(HomeLayout::new(1280., 700.).recent_count, 3);
-        assert!(!HomeLayout::new(500., 500.).show_descriptions);
+        assert_eq!(HomeLayout::new(500., 500., true).recent_count, 1);
+        assert_eq!(HomeLayout::new(750., 500., true).recent_count, 2);
+        assert_eq!(HomeLayout::new(1280., 700., true).recent_count, 3);
+        assert!(!HomeLayout::new(500., 500., true).show_descriptions);
+    }
+
+    #[test]
+    fn test_home_without_recent_projects_reserves_no_section_space() {
+        for (width, body_height) in [(1533., 763.), (1280., 700.), (750., 500.), (400., 250.)] {
+            let empty = HomeLayout::new(width, body_height, false);
+            let populated = HomeLayout::new(width, body_height, true);
+            assert!(!empty.show_recent_cards);
+            assert_eq!(empty.recent_header_height, 0.);
+            assert_eq!(empty.recent_top_gap, 0.);
+            assert!(empty.action_height + empty.bottom_padding <= body_height);
+            assert!(empty.heading_size >= populated.heading_size);
+        }
     }
 }
