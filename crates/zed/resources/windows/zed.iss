@@ -1388,10 +1388,131 @@ begin
     Result := ExpandConstant('{app}');
 end;
 
+// Microsoft documents pv > 0.0.0.0 under the WebView2 client GUID:
+// https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution
+function IsWebView2Version(const Version: string): Boolean;
+var
+  I, Dots: Integer;
+  HasDigit, HasNonZero: Boolean;
+begin
+  Result := False;
+  Dots := 0;
+  HasDigit := False;
+  HasNonZero := False;
+  for I := 1 to Length(Version) do
+  begin
+    if Version[I] = '.' then
+    begin
+      if not HasDigit then Exit;
+      Dots := Dots + 1;
+      HasDigit := False;
+    end
+    else
+    begin
+      if (Version[I] < '0') or (Version[I] > '9') then Exit;
+      HasDigit := True;
+      if Version[I] <> '0' then HasNonZero := True;
+    end;
+  end;
+  Result := HasDigit and HasNonZero and (Dots = 3);
+end;
+
+function HasSystemWebView2(): Boolean;
+var
+  ClientKey, Version: string;
+begin
+  ClientKey := 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+  // HKLM32 selects HKLM\SOFTWARE\WOW6432Node on 64-bit Windows.
+  Result := (RegQueryStringValue(HKLM32, ClientKey, 'pv', Version) and IsWebView2Version(Version)) or
+    (RegQueryStringValue(HKCU32, ClientKey, 'pv', Version) and IsWebView2Version(Version));
+  if not Result and IsWin64 then
+    Result := (RegQueryStringValue(HKCU64, ClientKey, 'pv', Version) and IsWebView2Version(Version)) or
+      (RegQueryStringValue(HKLM64, ClientKey, 'pv', Version) and IsWebView2Version(Version));
+end;
+
+function VerifyWebView2Bootstrapper(const Bootstrapper: string): Boolean;
+var
+  ScriptPath, Script, Parameters: string;
+  ResultCode: Integer;
+begin
+  // Evergreen changes over time: validate Microsoft's Authenticode signature,
+  // rather than pinning a stale bootstrapper hash. Never execute an untrusted download.
+  ScriptPath := ExpandConstant('{tmp}\verify-webview2-bootstrapper.ps1');
+  Script := 'param([string]$Path)' + #13#10 +
+    '$ErrorActionPreference = ''Stop''' + #13#10 +
+    '$signature = Get-AuthenticodeSignature -LiteralPath $Path' + #13#10 +
+    'if ($signature.Status -ne ''Valid'' -or $null -eq $signature.SignerCertificate) { exit 1 }' + #13#10 +
+    'if ($signature.SignerCertificate.Subject -notmatch ''(^|,\s*)O=Microsoft Corporation(,|$)'') { exit 1 }' + #13#10 +
+    'exit 0' + #13#10;
+  Result := False;
+  if not SaveStringToFile(ScriptPath, Script, False) then Exit;
+  Parameters := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ScriptPath + '" -Path "' + Bootstrapper + '"';
+  if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Parameters,
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := ResultCode = 0;
+end;
+
+procedure EnsureSystemWebView2();
+var
+  Bootstrapper, Failure: string;
+  ResultCode: Integer;
+begin
+  if HasSystemWebView2() then
+  begin
+    Log('Shared Evergreen WebView2 is already installed; no browser download needed.');
+    Exit;
+  end;
+  Failure := '';
+  try
+    Log('Shared Evergreen WebView2 is missing; downloading Microsoft bootstrapper.');
+    // The official Evergreen link. Download only into this setup's temporary
+    // directory; neither the bootstrapper nor the runtime is app payload.
+    DownloadTemporaryFile('https://go.microsoft.com/fwlink/p/?LinkId=2124703',
+      'MicrosoftEdgeWebview2Setup.exe', '', nil);
+    Bootstrapper := ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe');
+    if not VerifyWebView2Bootstrapper(Bootstrapper) then
+      Failure := 'Microsoft bootstrapper signature verification failed.'
+    else if not Exec(Bootstrapper, '/silent /install', '', SW_HIDE,
+        ewWaitUntilTerminated, ResultCode) then
+      Failure := 'Could not start Microsoft WebView2 setup.'
+    else if not HasSystemWebView2() then
+      Failure := Format('Microsoft WebView2 setup returned %d; the runtime is still unavailable.', [ResultCode]);
+  except
+    Failure := GetExceptionMessage;
+  end;
+  if Failure = '' then
+    Log('Shared Evergreen WebView2 installed successfully.')
+  else
+  begin
+    // Browser preview is optional. Offline/download/installer failures must
+    // never prevent installation or launch of the editor, Chat, or harness.
+    Log('Browser preview dependency: ' + Failure);
+    if not WizardSilent() then
+      SuppressibleMsgBox('KnightCode was installed, but browser preview needs Microsoft WebView2 Runtime.' + #13#10 +
+        'The editor, Chat, and harness remain available.' + #13#10 +
+        'Install the runtime from https://developer.microsoft.com/microsoft-edge/webview2/consumer/ and reload browser preview.' + #13#10 +
+        Failure, mbInformation, MB_OK, IDOK);
+  end;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and not HasSystemWebView2() then
+  begin
+    // Keep the optional-dependency instructions on the final wizard page,
+    // even after the post-install warning has been dismissed.
+    WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + #13#10 + #13#10 +
+      'Browser preview needs Microsoft WebView2 Runtime. The editor, Chat, and harness remain available.' + #13#10 +
+      'Install it from https://developer.microsoft.com/microsoft-edge/webview2/consumer/ and reload browser preview.';
+    WizardForm.FinishedLabel.AdjustHeight;
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    EnsureSystemWebView2();
     // Remove only our obsolete private runtime after a normal installation.
     // Updates swap the whole resources directory transactionally instead;
     // never delete their active runtime before that swap/rollback completes.

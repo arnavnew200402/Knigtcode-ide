@@ -27,4 +27,7 @@ const installer = text('crates/zed/resources/windows/zed.iss');
 assert(!installer.includes('GrantDesktopRuntimeAccess'));
 assert(installer.includes('if not IsUpdating() then'), 'Never delete the active runtime during staged updates');
 assert(installer.includes("{app}\\resources\\desktop\\webview2"), 'Clean up obsolete private runtime on normal upgrade');
+for (const expected of ['{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'HKLM32', 'HKCU32', 'HKCU64', "'pv'", 'IsWebView2Version', 'https://go.microsoft.com/fwlink/p/?LinkId=2124703', '/silent /install', 'Get-AuthenticodeSignature', 'Microsoft Corporation', 'EnsureSystemWebView2();']) assert(installer.includes(expected), expected);
+assert(!installer.includes('Source: "MicrosoftEdgeWebview2Setup.exe"'), 'Bootstrapper must not be installed as app payload');
+assert(installer.includes('CurPageID = wpFinished') && installer.includes('WizardForm.FinishedLabel.Caption'), 'Keep missing-runtime instructions visible on the final setup page');
 console.log('System browser source/packaging checks passed; platform compilation and runtime checks remain required.');

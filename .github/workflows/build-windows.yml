@@ -153,6 +153,10 @@ jobs:
           $nasm = Join-Path $env:ProgramData 'chocolatey\bin'
           "$nasm" >> $env:GITHUB_PATH
 
+      - name: Test Evergreen installer detection and optional installation
+        shell: pwsh
+        run: script/test-windows-evergreen-installer.ps1
+
       - name: Acquire verified desktop resources
         shell: pwsh
         run: |
