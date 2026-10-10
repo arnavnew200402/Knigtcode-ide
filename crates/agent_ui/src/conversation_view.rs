@@ -5980,8 +5980,11 @@ pub(crate) mod tests {
     async fn test_build_workbench_preserves_session_and_draft_across_chat(cx: &mut TestAppContext) {
         init_test(cx);
         let connection = StubAgentConnection::new().with_agent_id(agent::ZED_AGENT_ID.clone());
-        let (conversation, cx) =
-            setup_conversation_view(StubAgentServer::new(connection), cx).await;
+        let (conversation, cx) = setup_conversation_view(
+            StubAgentServer::new(connection).with_connection_agent_id(),
+            cx,
+        )
+        .await;
         let view = active_thread(&conversation, cx);
         let session_id = view.read_with(cx, |view, _| view.session_id.clone());
         let composer = message_editor(&conversation, cx);
@@ -5993,6 +5996,10 @@ pub(crate) mod tests {
         conversation.update_in(cx, |conversation, window, cx| {
             conversation.set_build_presentation(true, window, cx);
             conversation.set_build_presentation(true, window, cx);
+        });
+        view.read_with(cx, |view, cx| {
+            assert_eq!(view.agent_id, agent::ZED_AGENT_ID.clone());
+            assert!(view.thread.read(cx).parent_session_id().is_none());
         });
         assert_eq!(
             editor.update(cx, |editor, cx| editor.placeholder_text(cx)),
@@ -6028,6 +6035,15 @@ pub(crate) mod tests {
             composer.read_with(cx, |composer, cx| composer.text(cx)),
             "Keep my Build draft"
         );
+        assert_eq!(
+            editor.update(cx, |editor, cx| editor.placeholder_text(cx)),
+            Some("Ask KnightCode anything...".into())
+        );
+        cx.run_until_parked();
+        assert_eq!(
+            editor.update(cx, |editor, cx| editor.placeholder_text(cx)),
+            Some("Ask KnightCode anything...".into())
+        );
         conversation.update_in(cx, |conversation, window, cx| {
             conversation.set_build_presentation(false, window, cx)
         });
@@ -6042,6 +6058,43 @@ pub(crate) mod tests {
     }
 
     #[gpui::test(iterations = 5)]
+    async fn test_build_workbench_preserves_external_agent_composer(cx: &mut TestAppContext) {
+        init_test(cx);
+        let (conversation, cx) =
+            setup_conversation_view(StubAgentServer::default_response(), cx).await;
+        let view = active_thread(&conversation, cx);
+        assert_ne!(
+            view.read_with(cx, |view, _| view.agent_id.clone()),
+            agent::ZED_AGENT_ID.clone()
+        );
+        let composer = message_editor(&conversation, cx);
+        let editor = composer.update(cx, |composer, _| composer.editor().clone());
+        let original_placeholder = editor.update(cx, |editor, cx| editor.placeholder_text(cx));
+        composer.update_in(cx, |composer, window, cx| {
+            composer.set_text("Keep my external agent draft", window, cx)
+        });
+        conversation.update_in(cx, |conversation, window, cx| {
+            conversation.set_build_presentation(true, window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            editor.update(cx, |editor, cx| editor.placeholder_text(cx)),
+            original_placeholder
+        );
+        conversation.update_in(cx, |conversation, window, cx| {
+            conversation.set_build_presentation(false, window, cx)
+        });
+        assert_eq!(
+            composer.read_with(cx, |composer, cx| composer.text(cx)),
+            "Keep my external agent draft"
+        );
+        assert_eq!(
+            editor.update(cx, |editor, cx| editor.placeholder_text(cx)),
+            original_placeholder
+        );
+    }
+
+    #[gpui::test(iterations = 5)]
     async fn test_build_workbench_sends_and_receives_on_the_connected_session(
         cx: &mut TestAppContext,
     ) {
@@ -6050,13 +6103,20 @@ pub(crate) mod tests {
         connection.set_next_prompt_updates(vec![acp::SessionUpdate::AgentMessageChunk(
             acp::ContentChunk::new("Connected Build response".into()),
         )]);
-        let (conversation, cx) =
-            setup_conversation_view(StubAgentServer::new(connection), cx).await;
+        let (conversation, cx) = setup_conversation_view(
+            StubAgentServer::new(connection).with_connection_agent_id(),
+            cx,
+        )
+        .await;
         add_to_workspace(conversation.clone(), cx);
         conversation.update_in(cx, |conversation, window, cx| {
             conversation.set_build_presentation(true, window, cx)
         });
         let view = active_thread(&conversation, cx);
+        view.read_with(cx, |view, cx| {
+            assert_eq!(view.agent_id, agent::ZED_AGENT_ID.clone());
+            assert!(view.thread.read(cx).parent_session_id().is_none());
+        });
         let session_id = view.read_with(cx, |view, _| view.session_id.clone());
         message_editor(&conversation, cx).update_in(cx, |editor, window, cx| {
             editor.set_text("Build a feature", window, cx)
@@ -6236,11 +6296,26 @@ pub(crate) mod tests {
 
     pub(crate) struct StubAgentServer<C> {
         connection: C,
+        agent_id: AgentId,
     }
 
     impl<C> StubAgentServer<C> {
         pub(crate) fn new(connection: C) -> Self {
-            Self { connection }
+            Self {
+                connection,
+                agent_id: "Test".into(),
+            }
+        }
+
+        // Presentation is selected from the server identity, not just the
+        // connection identity. Keep the existing external-agent default for
+        // other tests, but let native-agent tests exercise the actual UI path.
+        pub(crate) fn with_connection_agent_id(mut self) -> Self
+        where
+            C: AgentConnection,
+        {
+            self.agent_id = self.connection.agent_id();
+            self
         }
     }
 
@@ -6263,7 +6338,7 @@ pub(crate) mod tests {
         }
 
         fn agent_id(&self) -> AgentId {
-            "Test".into()
+            self.agent_id.clone()
         }
 
         fn connect(

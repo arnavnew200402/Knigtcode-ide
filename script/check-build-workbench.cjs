@@ -44,6 +44,21 @@ const tests = read('crates/agent_ui/src/conversation_view.rs');
 for (const test of [
   'test_build_workbench_preserves_session_and_draft_across_chat',
   'test_build_workbench_sends_and_receives_on_the_connected_session',
+  'test_build_workbench_preserves_external_agent_composer',
 ]) assert.ok(tests.includes(`async fn ${test}`), `missing GPUI regression: ${test}`);
+for (const test of [
+  'test_build_workbench_preserves_session_and_draft_across_chat',
+  'test_build_workbench_sends_and_receives_on_the_connected_session',
+]) {
+  const start = tests.indexOf(`async fn ${test}`);
+  const end = tests.indexOf('#[gpui::test', start);
+  const body = tests.slice(start, end === -1 ? undefined : end);
+  assert.ok(body.includes('with_connection_agent_id()'), `${test}: server and connection must both identify the native agent`);
+  assert.ok(body.includes('assert_eq!(view.agent_id, agent::ZED_AGENT_ID.clone())'), `${test}: assert the actual ThreadView identity`);
+}
+const nativeConfig = read('.cargo/config.toml');
+for (const target of ['x86_64_pc_windows_msvc', 'aarch64_pc_windows_msvc']) {
+  assert.ok(nativeConfig.includes(`CFLAGS_${target} = "/DWASM_API_EXTERN= /DWASI_API_EXTERN="`), `${target}: static Wasmtime C API declarations`);
+}
 
 console.log('Native Build source/artwork checks passed (Rust type-check and runtime verification still required).');

@@ -22,3 +22,9 @@ rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 
 [env]
 MACOSX_DEPLOYMENT_TARGET = "10.15.7"
+# Tree-sitter's C code calls the Wasmtime C API provided by the statically
+# linked Rust crate, not a Wasmtime DLL. The upstream headers otherwise mark
+# these functions dllimport on MSVC, causing LNK4217 and import thunks.
+# Target-specific C flags leave non-Windows builds and Rust flags unchanged.
+CFLAGS_x86_64_pc_windows_msvc = "/DWASM_API_EXTERN= /DWASI_API_EXTERN="
+CFLAGS_aarch64_pc_windows_msvc = "/DWASM_API_EXTERN= /DWASI_API_EXTERN="
