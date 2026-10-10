@@ -1,4 +1,4 @@
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use {
     crate::BrowserResources,
     anyhow::{Result, bail},
@@ -12,6 +12,12 @@ use {
 mod windows_host;
 #[cfg(target_os = "windows")]
 pub use windows_host::NativeHost;
+
+#[cfg(target_os = "macos")]
+#[path = "macos.rs"]
+mod macos_host;
+#[cfg(target_os = "macos")]
+pub use macos_host::NativeHost;
 
 pub struct NativeCapture {
     pub png: Vec<u8>,
@@ -32,13 +38,13 @@ pub enum NativeEvent {
     FocusAddress,
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub struct NativeHost;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 impl NativeHost {
     pub fn new(_: &Window, _: BrowserResources) -> Result<(Self, Receiver<NativeEvent>)> {
-        bail!("Embedded browser preview is currently available on Windows only")
+        bail!("Embedded browser preview requires Windows WebView2 or macOS WebKit")
     }
     pub fn navigate(&self, _: &str) -> Result<()> {
         bail!("WebView2 requires Windows")

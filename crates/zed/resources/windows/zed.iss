@@ -1388,27 +1388,15 @@ begin
     Result := ExpandConstant('{app}');
 end;
 
-procedure GrantDesktopRuntimeAccess();
-var
-  ResultCode: Integer;
-  RuntimeDir: string;
-begin
-  // Windows 10 Fixed Version 120+ renderers run inside AppContainer. Installer
-  // extraction does not preserve the ACLs granted on the packaging machine.
-  RuntimeDir := GetInstallDir('') + '\resources\desktop\webview2';
-  if not Exec(ExpandConstant('{sys}\icacls.exe'),
-    '"' + RuntimeDir + '" /grant "*S-1-15-2-1:(OI)(CI)(RX)" "*S-1-15-2-2:(OI)(CI)(RX)" /T /Q',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    RaiseException('Could not grant bundled WebView2 runtime access.');
-  if ResultCode <> 0 then
-    RaiseException('Could not grant bundled WebView2 runtime access: ' + IntToStr(ResultCode));
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
-    GrantDesktopRuntimeAccess();
+    // Remove only our obsolete private runtime after a normal installation.
+    // Updates swap the whole resources directory transactionally instead;
+    // never delete their active runtime before that swap/rollback completes.
+    if not IsUpdating() then
+      DelTree(ExpandConstant('{app}\resources\desktop\webview2'), True, True, True);
     if IsUpdating() then
     begin
       SaveStringToFile(ExpandConstant('{app}\updates\versions.txt'), '{#Version}' + #13#10, True);

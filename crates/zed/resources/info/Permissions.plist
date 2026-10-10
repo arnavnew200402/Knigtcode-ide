@@ -24,3 +24,12 @@
 <string>An application in KnightCode wants to use your reminders.</string>
 <key>NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac</key>
 <true/>
+<!-- WebKit preview must load local HTTP development servers. Keep the
+     exception confined to embedded web content, not native networking. -->
+<key>NSAppTransportSecurity</key>
+<dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+    <key>NSAllowsArbitraryLoadsInWebContent</key>
+    <true/>
+</dict>

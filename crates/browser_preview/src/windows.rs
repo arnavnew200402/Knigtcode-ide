@@ -57,12 +57,19 @@ impl NativeHost {
         resources: BrowserResources,
     ) -> Result<(Self, Receiver<NativeEvent>)> {
         let parent = hwnd(window)?;
-        let runtime_version = resources.runtime_version;
+        // A null browser folder selects Microsoft's shared Evergreen runtime.
+        // Do not pin its version: Windows/Microsoft updates it independently.
+        let mut version = PWSTR::null();
+        unsafe { GetAvailableCoreWebView2BrowserVersionString(PCWSTR::null(), &mut version) }
+            .context("Microsoft WebView2 Runtime is missing or unavailable. Install it from https://developer.microsoft.com/microsoft-edge/webview2/consumer/ and reload browser preview")?;
+        let version = take_pwstr(version);
+        if version.is_empty() {
+            bail!("Microsoft WebView2 Runtime returned no version; repair the system runtime");
+        }
+        log::info!("Using system WebView2 runtime {version}");
         std::fs::create_dir_all(&resources.user_data_directory)
             .context("Creating browser profile directory")?;
-        let runtime = resources.runtime_directory.as_os_str().to_string_lossy();
         let user_data = resources.user_data_directory.as_os_str().to_string_lossy();
-        let runtime: Vec<u16> = runtime.encode_utf16().chain(Some(0)).collect();
         let user_data: Vec<u16> = user_data.encode_utf16().chain(Some(0)).collect();
         let controller = Rc::new(RefCell::new(None));
         let weak_controller = Rc::downgrade(&controller);
@@ -71,18 +78,14 @@ impl NativeHost {
         let environment_handler = CreateCoreWebView2EnvironmentCompletedHandler::create(Box::new(
             move |result, environment| {
                 let result = (|| -> Result<()> {
-                    result.context("Creating bundled WebView2 environment")?;
+                    result.context("Creating system WebView2 environment; install or repair Microsoft WebView2 Runtime if unavailable")?;
                     let environment = environment.context("WebView2 returned no environment")?;
                     let mut version = PWSTR::null();
                     unsafe {
                         environment.BrowserVersionString(&mut version)?;
                     }
                     let version = take_pwstr(version);
-                    if version != runtime_version {
-                        bail!(
-                            "WebView2 loaded version {version}, but the bundle requires {runtime_version}"
-                        );
-                    }
+                    log::debug!("System WebView2 environment version: {version}");
                     if weak_controller.upgrade().is_none() {
                         return Ok(());
                     }
@@ -138,12 +141,12 @@ impl NativeHost {
         // completion handlers must run through GPUI's existing STA loop.
         unsafe {
             CreateCoreWebView2EnvironmentWithOptions(
-                PCWSTR(runtime.as_ptr()),
+                PCWSTR::null(),
                 PCWSTR(user_data.as_ptr()),
                 None::<&ICoreWebView2EnvironmentOptions>,
                 &environment_handler,
             )
-            .context("Starting the bundled fixed WebView2 runtime")?;
+            .context("Starting system WebView2; install or repair Microsoft WebView2 Runtime if unavailable")?;
         }
         Ok((
             Self {

@@ -124,7 +124,7 @@ function StageEngine {
 function VerifyDesktopResources {
     param([string]$Directory)
     if (-not (Test-Path -LiteralPath (Join-Path $Directory 'manifest.json') -PathType Leaf)) {
-        throw "Bundled fixed WebView2 runtime and Whisper tiny.en resources are missing in $Directory. Run script/acquire-desktop-resources.ps1 -OutputDirectory '$Directory' with the reviewed specification before bundling."
+        throw "Bundled Whisper tiny.en resources are missing in $Directory. Run script/acquire-desktop-resources.ps1 -OutputDirectory '$Directory' with the reviewed specification before bundling."
     }
     $resourceArchitecture = switch ($Architecture) {
         'x86_64' { 'x64' }
@@ -143,9 +143,6 @@ function StageDesktopResources {
     if (Test-Path -LiteralPath $destination) { throw "Desktop resource staging destination already exists: $destination" }
     Copy-Item -LiteralPath $desktopResourcesSource -Destination $destination -Recurse
     VerifyDesktopResources $destination
-    & "$env:SystemRoot/System32/icacls.exe" (Join-Path $destination 'webview2') '/grant' `
-        '*S-1-15-2-1:(OI)(CI)(RX)' '*S-1-15-2-2:(OI)(CI)(RX)' '/T' '/Q'
-    if ($LASTEXITCODE -ne 0) { throw 'Could not grant staged fixed WebView2 runtime AppContainer access.' }
     Write-Output "Staged verified desktop resources from $desktopResourcesSource"
 }
 

@@ -7,7 +7,6 @@ use gpui::{
     Global, Hitbox, HitboxBehavior, KeyBinding, Pixels, Subscription, Task, WeakEntity, actions,
     canvas,
 };
-use serde::Deserialize;
 use ui::prelude::*;
 use ui_input::InputField;
 use workspace::{Item, Workspace, item::ItemEvent};
@@ -72,63 +71,15 @@ pub enum PreviewStatus {
     Failed(String),
 }
 
-#[derive(Deserialize)]
-struct ResourceManifest {
-    schema_version: u32,
-    architecture: String,
-    webview2: RuntimeManifest,
-}
-
-#[derive(Deserialize)]
-struct RuntimeManifest {
-    version: String,
-    archive_sha256: String,
-}
-
 pub struct BrowserResources {
-    pub runtime_directory: PathBuf,
-    pub runtime_version: String,
     pub user_data_directory: PathBuf,
 }
 
 impl BrowserResources {
-    pub fn bundled() -> Result<Self> {
-        let executable = std::env::current_exe().context("Locating the IDE executable")?;
-        let parent = executable
-            .parent()
-            .context("Executable has no parent directory")?;
-        let directory = parent.join("resources").join("desktop");
-        let manifest: ResourceManifest = serde_json::from_slice(
-            &std::fs::read(directory.join("manifest.json"))
-                .context("Bundled desktop resource manifest is missing; reinstall KnightCode")?,
-        )?;
-        let architecture = match std::env::consts::ARCH {
-            "x86_64" => "x64",
-            "aarch64" => "arm64",
-            architecture => bail!("Embedded preview does not support {architecture}"),
-        };
-        if manifest.schema_version != 1 || manifest.architecture != architecture {
-            bail!("Bundled browser runtime manifest does not match this IDE");
-        }
-        if manifest.webview2.version.trim().is_empty()
-            || manifest.webview2.archive_sha256.len() != 64
-            || !manifest
-                .webview2
-                .archive_sha256
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit())
-        {
-            bail!("Bundled browser runtime manifest is invalid");
-        }
-        let runtime_directory = directory.join("webview2");
-        if !runtime_directory.join("msedgewebview2.exe").is_file() {
-            bail!("Bundled fixed WebView2 runtime is missing; reinstall KnightCode");
-        }
-        Ok(Self {
-            runtime_directory,
-            runtime_version: manifest.webview2.version,
+    pub fn system() -> Self {
+        Self {
             user_data_directory: paths::data_dir().join("browser-preview"),
-        })
+        }
     }
 }
 
@@ -362,10 +313,7 @@ impl BrowserPreview {
     }
 
     fn start_host(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Result<()> {
-        if !cfg!(target_os = "windows") {
-            bail!("Embedded browser preview is currently available on Windows only");
-        }
-        let (host, receiver) = NativeHost::new(window, BrowserResources::bundled()?)?;
+        let (host, receiver) = NativeHost::new(window, BrowserResources::system())?;
         self.host = Some(host);
         self.native_visible.set(None);
         let executor = cx.background_executor().clone();
@@ -408,7 +356,7 @@ impl BrowserPreview {
             if let Err(error) = this.update(cx, |this, cx| {
                 if this.status == PreviewStatus::Starting {
                     this.status = PreviewStatus::Failed(
-                        "Bundled browser startup timed out; reload to retry".into(),
+                        "System browser startup timed out; reload to retry".into(),
                     );
                     cx.notify();
                 }
@@ -662,7 +610,7 @@ impl Render for BrowserPreview {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.weak_entity();
         let status = match &self.status {
-            PreviewStatus::Starting => "Starting bundled browser…".into(),
+            PreviewStatus::Starting => "Starting system browser…".into(),
             PreviewStatus::Loading => "Loading…".into(),
             PreviewStatus::Ready => self.page_url.clone(),
             PreviewStatus::Failed(error) => error.clone(),
@@ -724,6 +672,10 @@ impl Render for BrowserPreview {
                     .child(Button::new("browser-go", "Go").on_click(
                         cx.listener(|this, _, window, cx| this.go(&Navigate, window, cx)),
                     ))
+                    .when(cfg!(target_os = "windows") && matches!(&self.status, PreviewStatus::Failed(error) if error.contains("Microsoft WebView2 Runtime")), |bar| {
+                        bar.child(Button::new("browser-install-runtime", "Get WebView2")
+                            .on_click(|_, _, cx| cx.open_url("https://developer.microsoft.com/microsoft-edge/webview2/consumer/")))
+                    })
                     .child(
                         Button::new("browser-external", "Open External")
                             .on_click(cx.listener(|this, _, _, cx| this.open_external(cx))),
@@ -819,6 +771,15 @@ fn normalize_url(input: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_browser_does_not_require_a_bundled_manifest() {
+        let resources = BrowserResources::system();
+        assert_eq!(
+            resources.user_data_directory,
+            paths::data_dir().join("browser-preview")
+        );
+    }
 
     #[test]
     fn local_urls_and_unsupported_schemes() -> Result<()> {

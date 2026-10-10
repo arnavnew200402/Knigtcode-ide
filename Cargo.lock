@@ -2412,9 +2412,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
+ "block",
+ "cocoa 0.26.0",
  "futures 0.3.32",
  "gpui",
  "log",
+ "objc",
  "paths",
  "raw-window-handle",
  "serde",
